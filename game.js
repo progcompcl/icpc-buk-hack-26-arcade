@@ -1,8 +1,8 @@
 // Rhythm Gorillas
 
 const ARCADE_CONTROLS = {
-  'P1U': ['w'], 'P1D': ['s'],
-  'P2U': ['ArrowUp'], 'P2D': ['ArrowDown'],
+  'P1U': ['w'], 'P1D': ['s'], 'P1L': ['a'], 'P1R': ['d'],
+  'P2U': ['ArrowUp'], 'P2D': ['ArrowDown'], 'P2L': ['ArrowLeft'], 'P2R': ['ArrowRight'],
   'P1A': ['u'], 'P2A': ['r'],
   'START1': ['1', 'Enter'], 'START2': ['2']
 };
@@ -51,14 +51,15 @@ function happy() { return m.zone === f.zone; }
 let projectiles = [];
 
 // ── Player (Moose + Sled) ────────────────────────────────────────────────────
-const MOOSE_X = 132, SLED_X = 50;
 const MOVE_CD = 160, DMG_RATE = 0.4;
-let mooseLane = 5, mooseCY = 0, mooseMCool = 0;
+let mooseX = 132, sledX = 50;
+let mooseLane = 5, mooseCY = 0, mooseMCool = 0, mooseHCool = 0;
 let sledLane  = 5, sledCY  = 0;
 let life = 3, score = 0;
 let celebTimer = 0, damageTimer = 0, dmgShake = 0;
 let gameOver = false;
 let lifeText, scoreText;
+let heartParticles = [], heartCooldown = 0;
 
 function laneCY(lane) {
   return ZY[Math.floor(lane / 4)] + (lane % 4) * SH + SH / 2;
@@ -99,7 +100,7 @@ function update(time, delta) {
   m.punch *= 0.72; f.punch *= 0.72;
   m.bounce *= 0.72; f.bounce *= 0.72;
 
-  // Moose input (ArrowUp/ArrowDown or W/S)
+  // Moose vertical input (ArrowUp/Down or W/S)
   mooseMCool -= delta;
   if (mooseMCool <= 0) {
     if ((keys['P2U'] || keys['P1U']) && mooseLane > 0) {
@@ -108,6 +109,17 @@ function update(time, delta) {
       mooseLane++; mooseMCool = MOVE_CD;
     }
   }
+
+  // Moose horizontal input (ArrowLeft/Right or A/D)
+  mooseHCool -= delta;
+  if (mooseHCool <= 0) {
+    if ((keys['P2R'] || keys['P1R']) && mooseX < 275) {
+      mooseX += 25; mooseHCool = MOVE_CD;
+    } else if ((keys['P2L'] || keys['P1L']) && mooseX > 120) {
+      mooseX -= 25; mooseHCool = MOVE_CD;
+    }
+  }
+  sledX = mooseX - 82;
 
   // Tether: sled can't be more than 2 lanes from moose
   if (mooseLane - sledLane > 2) sledLane = mooseLane - 2;
@@ -120,7 +132,15 @@ function update(time, delta) {
   // Timers
   damageTimer -= delta; if (damageTimer < 0) damageTimer = 0;
   celebTimer  -= delta; if (celebTimer  < 0) celebTimer  = 0;
+  heartCooldown -= delta; if (heartCooldown < 0) heartCooldown = 0;
   dmgShake = damageTimer > 0 ? (Math.random() - 0.5) * 8 : 0;
+
+  // Update heart particles
+  for (let i = heartParticles.length - 1; i >= 0; i--) {
+    const hp = heartParticles[i];
+    hp.x += hp.vx; hp.y += hp.vy; hp.vy += 0.08; hp.alpha -= 0.025;
+    if (hp.alpha <= 0) { heartParticles.splice(i, 1); }
+  }
 
   // Collisions
   checkCollisions(delta);
@@ -133,8 +153,10 @@ function update(time, delta) {
   drawZones();
   drawProjectiles();
   drawRope();
-  drawSled(SLED_X, sledCY, celebTimer > 0, dmgShake);
-  drawMoose(MOOSE_X, mooseCY);
+  drawSled(sledX, sledCY, celebTimer > 0, dmgShake);
+  // Draw breaking hearts on top of sled
+  for (const hp of heartParticles) { drawBrokenHeart(hp.x, hp.y, hp.r, hp.alpha); }
+  drawMoose(mooseX, mooseCY);
   drawSeparator();
   drawChar(m, 672, false);
   drawChar(f, 742, true);
@@ -208,8 +230,9 @@ function spawnGoodie(zone, slot) {
 // ─── Player mechanics ────────────────────────────────────────────────────────
 
 function checkCollisions(delta) {
-  const sx = SLED_X - 38, sw = 76;
-  const sy = sledCY - SH * 0.5, sh = SH;
+  // Hitbox: just the wooden sled planks — no children, not too strict
+  const sx = sledX - 24, sw = 48;
+  const sy = sledCY - 5,  sh = 22;
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
     if (p.x + p.w < sx || p.x > sx + sw || p.y + p.h < sy || p.y > sy + sh) continue;
@@ -230,6 +253,11 @@ function checkCollisions(delta) {
         }
       }
       damageTimer = 200;
+      // Spawn breaking hearts periodically while taking damage
+      if (heartCooldown <= 0) {
+        heartCooldown = 550;
+        spawnHeartBreak(sledX, sledCY);
+      }
     } else {
       if (p.subtype === 2) { life = Math.min(5, life + 1); }
       else { score += 10; }
@@ -241,8 +269,8 @@ function checkCollisions(delta) {
 }
 
 function drawRope() {
-  const x1 = SLED_X + 33, y1 = sledCY;
-  const x2 = MOOSE_X - 28, y2 = mooseCY;
+  const x1 = sledX + 33, y1 = sledCY;
+  const x2 = mooseX - 28, y2 = mooseCY;
   const tense = Math.abs(mooseLane - sledLane) >= 2;
   gfx.lineStyle(2, tense ? 0xff8800 : 0x885522, 1);
   gfx.beginPath();
@@ -256,6 +284,43 @@ function drawRope() {
     }
   }
   gfx.strokePath();
+}
+
+function spawnHeartBreak(sx, sy) {
+  const cxs = [sx - 19, sx, sx + 19];
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 2; j++) {
+      heartParticles.push({
+        x: cxs[i] + (Math.random() - 0.5) * 10,
+        y: sy - 22 + (Math.random() - 0.5) * 6,
+        vx: (Math.random() - 0.5) * 3,
+        vy: -1.5 - Math.random() * 2,
+        alpha: 0.9,
+        r: 3 + Math.random() * 3
+      });
+    }
+  }
+}
+
+function drawBrokenHeart(x, y, r, alpha) {
+  // Left half: one bump + left half of triangle
+  gfx.fillStyle(0xff2255, alpha);
+  gfx.fillCircle(x - r * 0.7 - 2, y - r * 0.3, r * 0.6);
+  gfx.fillTriangle(
+    x - r * 1.3 - 2, y - r * 0.2,
+    x - 2,           y - r * 0.2,
+    x - 2,           y + r * 1.1
+  );
+  // Right half: one bump + right half of triangle
+  gfx.fillCircle(x + r * 0.7 + 2, y - r * 0.3, r * 0.6);
+  gfx.fillTriangle(
+    x + 2,           y - r * 0.2,
+    x + r * 1.3 + 2, y - r * 0.2,
+    x + 2,           y + r * 1.1
+  );
+  // White shine on left bump
+  gfx.fillStyle(0xffffff, alpha * 0.5);
+  gfx.fillCircle(x - r * 0.9 - 2, y - r * 0.55, r * 0.22);
 }
 
 function drawMoose(mx, my) {
