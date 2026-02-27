@@ -101,19 +101,20 @@ function onStep() {
   } else {
     m.punch = 22; f.punch = 22;
     playTone(90, 0.11, 'sawtooth');
-    spawnObstacle(m.zone, 0.5);
-    spawnObstacle(f.zone, 0.5);
+    spawnObstacle(m.zone);
+    spawnObstacle(f.zone);
   }
 }
 
 // Obstacle: height = ZH/3, width = 1x–3x height.
 // Starts with right edge flush at SEPARATOR, travels left.
-function spawnObstacle(zone, yFrac) {
+function spawnObstacle(zone) {
   const h = Math.floor(ZH / 3);
   const w = Math.floor(h * (1 + Math.random() * 2));
+  const slot = Math.floor(Math.random() * 3); // 0=top, 1=middle, 2=bottom
   projectiles.push({
     x: SEPARATOR - w,
-    y: ZY[zone] + ZH * yFrac - h / 2,
+    y: ZY[zone] + slot * h,
     w, h,
     speed: SEPARATOR / 7000,
     isObstacle: true,
