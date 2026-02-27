@@ -33,6 +33,10 @@ let winScore = 5;
 let beatInterval, scene;
 let particles = [];
 
+// Rhythm
+const RHYTHM_INTERVAL = 500; // ms — 2 steps per second
+let rhythmStep = 0, rhythmAccum = 0;
+
 // Paddle & ball settings
 const PW = 12, PH = 80, PS = 6;
 const BR = 8, BS = 3;
@@ -79,6 +83,8 @@ function resetBall(dir) {
 function startGame() {
   state = 'playing';
   resetGame();
+  rhythmStep = 0;
+  rhythmAccum = 0;
   startBeat();
 }
 
@@ -153,6 +159,13 @@ function drawMenu() {
 }
 
 function updateGame(delta) {
+  // Rhythm step advance
+  rhythmAccum += delta;
+  if (rhythmAccum >= RHYTHM_INTERVAL) {
+    rhythmAccum -= RHYTHM_INTERVAL;
+    rhythmStep = (rhythmStep + 1) % 4;
+  }
+
   // P1 movement
   if (keys['P1U'] && p1.y > 0) p1.y -= PS;
   if (keys['P1D'] && p1.y < 600 - PH) p1.y += PS;
@@ -270,6 +283,27 @@ function drawGame() {
   drawText(gfx, 'P1', 60, 30, 1.2);
   gfx.fillStyle(0xff00ff);
   drawText(gfx, players === 1 ? 'AI' : 'P2', 720, 30, 1.2);
+
+  drawRhythmBar();
+}
+
+function drawRhythmNote(cx, cy, color) {
+  gfx.fillStyle(color);
+  gfx.fillEllipse(cx, cy + 6, 12, 9);  // note head
+  gfx.fillRect(cx + 5, cy - 10, 2, 17); // stem
+  gfx.fillRect(cx + 5, cy - 10, 7, 2);  // flag
+}
+
+function drawRhythmBar() {
+  const BY = 558, BH = 40, CW = 200;
+  for (let i = 0; i < 4; i++) {
+    const active = i === rhythmStep;
+    gfx.fillStyle(active ? 0x222200 : 0x0a0a0a, 0.92);
+    gfx.fillRect(i * CW, BY, CW, BH);
+    gfx.lineStyle(1, active ? 0xffff00 : 0x333333, 1);
+    gfx.strokeRect(i * CW, BY, CW, BH);
+    drawRhythmNote(i * CW + CW / 2, BY + BH / 2 - 4, active ? 0xffff00 : 0x555555);
+  }
 }
 
 function drawGameOver() {
