@@ -50,14 +50,40 @@ function happy() { return m.zone === f.zone; }
 // Distance = SEPARATOR px, speed = SEPARATOR/7000 px/ms (constant).
 let projectiles = [];
 
+// ── Player (Moose + Sled) ────────────────────────────────────────────────────
+const MOOSE_X = 132, SLED_X = 50;
+const MOVE_CD = 160, DMG_RATE = 0.4;
+let mooseLane = 5, mooseCY = 0, mooseMCool = 0;
+let sledLane  = 5, sledCY  = 0;
+let life = 3, score = 0;
+let celebTimer = 0, damageTimer = 0, dmgShake = 0;
+let gameOver = false;
+let lifeText, scoreText;
+
+function laneCY(lane) {
+  return ZY[Math.floor(lane / 4)] + (lane % 4) * SH + SH / 2;
+}
+
 function create() {
   scene = this;
   gfx = this.add.graphics();
   this.input.keyboard.on('keydown', e => { keys[KEYBOARD_TO_ARCADE[e.key] || e.key] = true; });
   this.input.keyboard.on('keyup',   e => { keys[KEYBOARD_TO_ARCADE[e.key] || e.key] = false; });
+  mooseCY = laneCY(mooseLane);
+  sledCY  = laneCY(sledLane);
+  lifeText  = this.add.text(8,   4, 'LIFE: 3',  { fontSize: '15px', color: '#ff4444', fontFamily: 'monospace' });
+  scoreText = this.add.text(280, 4, 'SCORE: 0', { fontSize: '15px', color: '#ffff44', fontFamily: 'monospace' });
 }
 
 function update(time, delta) {
+  if (gameOver) {
+    gfx.clear();
+    drawZones();
+    drawSeparator();
+    drawRhythmBar();
+    return;
+  }
+
   rAccum += delta;
   if (rAccum >= RSTEP) {
     rAccum -= RSTEP;
@@ -73,9 +99,42 @@ function update(time, delta) {
   m.punch *= 0.72; f.punch *= 0.72;
   m.bounce *= 0.72; f.bounce *= 0.72;
 
+  // Moose input (ArrowUp/ArrowDown or W/S)
+  mooseMCool -= delta;
+  if (mooseMCool <= 0) {
+    if ((keys['P2U'] || keys['P1U']) && mooseLane > 0) {
+      mooseLane--; mooseMCool = MOVE_CD;
+    } else if ((keys['P2D'] || keys['P1D']) && mooseLane < 11) {
+      mooseLane++; mooseMCool = MOVE_CD;
+    }
+  }
+
+  // Tether: sled can't be more than 2 lanes from moose
+  if (mooseLane - sledLane > 2) sledLane = mooseLane - 2;
+  else if (sledLane - mooseLane > 2) sledLane = mooseLane + 2;
+
+  // Smooth visual lerp
+  mooseCY += (laneCY(mooseLane) - mooseCY) * 0.15;
+  sledCY  += (laneCY(sledLane)  - sledCY)  * 0.12;
+
+  // Timers
+  damageTimer -= delta; if (damageTimer < 0) damageTimer = 0;
+  celebTimer  -= delta; if (celebTimer  < 0) celebTimer  = 0;
+  dmgShake = damageTimer > 0 ? (Math.random() - 0.5) * 8 : 0;
+
+  // Collisions
+  checkCollisions(delta);
+
+  // HUD
+  lifeText.setText('LIFE: ' + Math.max(0, Math.ceil(life)));
+  scoreText.setText('SCORE: ' + score);
+
   gfx.clear();
   drawZones();
   drawProjectiles();
+  drawRope();
+  drawSled(SLED_X, sledCY, celebTimer > 0, dmgShake);
+  drawMoose(MOOSE_X, mooseCY);
   drawSeparator();
   drawChar(m, 672, false);
   drawChar(f, 742, true);
@@ -144,6 +203,156 @@ function spawnGoodie(zone, slot) {
     isObstacle: false,
     subtype: Math.floor(Math.random() * 3)
   });
+}
+
+// ─── Player mechanics ────────────────────────────────────────────────────────
+
+function checkCollisions(delta) {
+  const sx = SLED_X - 38, sw = 76;
+  const sy = sledCY - SH * 0.5, sh = SH;
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+    if (p.x + p.w < sx || p.x > sx + sw || p.y + p.h < sy || p.y > sy + sh) continue;
+    if (p.isObstacle) {
+      life -= DMG_RATE * delta / 1000;
+      if (life <= 0) {
+        life = 0;
+        if (!gameOver) {
+          gameOver = true;
+          scene.add.text(400, 252, 'GAME OVER', {
+            fontSize: '52px', color: '#ff2200', fontFamily: 'monospace',
+            stroke: '#000000', strokeThickness: 5
+          }).setOrigin(0.5);
+          scene.add.text(400, 316, 'SCORE: ' + score, {
+            fontSize: '30px', color: '#ffff44', fontFamily: 'monospace',
+            stroke: '#000000', strokeThickness: 3
+          }).setOrigin(0.5);
+        }
+      }
+      damageTimer = 200;
+    } else {
+      if (p.subtype === 2) { life = Math.min(5, life + 1); }
+      else { score += 10; }
+      celebTimer = 300;
+      playTone(880, 0.1, 'sine');
+      projectiles.splice(i, 1);
+    }
+  }
+}
+
+function drawRope() {
+  const x1 = SLED_X + 33, y1 = sledCY;
+  const x2 = MOOSE_X - 28, y2 = mooseCY;
+  const tense = Math.abs(mooseLane - sledLane) >= 2;
+  gfx.lineStyle(2, tense ? 0xff8800 : 0x885522, 1);
+  gfx.beginPath();
+  gfx.moveTo(x1, y1);
+  if (tense) {
+    gfx.lineTo(x2, y2);
+  } else {
+    for (let t = 1; t <= 8; t++) {
+      const f = t / 8;
+      gfx.lineTo(x1 + (x2 - x1) * f, y1 + (y2 - y1) * f + 9 * Math.sin(f * Math.PI));
+    }
+  }
+  gfx.strokePath();
+}
+
+function drawMoose(mx, my) {
+  // Shadow
+  gfx.fillStyle(0x000000, 0.22);
+  gfx.fillEllipse(mx, my + 24, 55, 10);
+  // Legs (4 legs)
+  gfx.fillStyle(0x3c1e00);
+  gfx.fillRect(mx - 20, my + 10, 6, 18);
+  gfx.fillRect(mx - 10, my + 10, 6, 18);
+  gfx.fillRect(mx + 5,  my + 10, 6, 18);
+  gfx.fillRect(mx + 15, my + 10, 6, 18);
+  // Tail (cream, left side)
+  gfx.fillStyle(0xddc888);
+  gfx.fillEllipse(mx - 25, my + 2, 10, 8);
+  // Body
+  gfx.fillStyle(0x7b4419);
+  gfx.fillEllipse(mx, my, 58, 32);
+  // Darker back stripe
+  gfx.fillStyle(0x5a3010);
+  gfx.fillEllipse(mx - 4, my - 6, 36, 12);
+  // Neck
+  gfx.fillStyle(0x7b4419);
+  gfx.fillRect(mx + 17, my - 18, 12, 20);
+  // Head
+  gfx.fillCircle(mx + 27, my - 22, 13);
+  // Snout (long characteristic moose snout)
+  gfx.fillStyle(0x5a3010);
+  gfx.fillEllipse(mx + 39, my - 20, 18, 11);
+  // Nostril
+  gfx.fillStyle(0x2a0e00);
+  gfx.fillCircle(mx + 45, my - 19, 2);
+  // Eye
+  gfx.fillStyle(0xffffff);
+  gfx.fillCircle(mx + 22, my - 27, 4);
+  gfx.fillStyle(0x111111);
+  gfx.fillCircle(mx + 23, my - 27, 2);
+  // Antlers (branching upward)
+  gfx.fillStyle(0x5d3210);
+  gfx.fillRect(mx + 19, my - 34, 3, 12);
+  gfx.fillRect(mx + 25, my - 32, 3, 10);
+  gfx.fillRect(mx + 13, my - 38, 14, 3);
+  gfx.fillRect(mx + 22, my - 36, 12, 3);
+  gfx.fillRect(mx + 13, my - 50, 3, 14);
+  gfx.fillRect(mx + 22, my - 48, 3, 14);
+  gfx.fillRect(mx + 30, my - 46, 3, 12);
+}
+
+function drawSled(sx, sy, celebrating, shake) {
+  const dy = celebrating ? -10 : 0;
+  const dx = shake;
+  // Shadow
+  gfx.fillStyle(0x000000, 0.2);
+  gfx.fillEllipse(sx + dx, sy + 22 + dy, 70, 10);
+  // Runners
+  gfx.fillStyle(0x3c2005);
+  gfx.fillRect(sx - 34 + dx, sy + 16 + dy, 68, 4);
+  gfx.fillRect(sx - 30 + dx, sy + 12 + dy, 4, 8);
+  gfx.fillRect(sx + 26 + dx, sy + 12 + dy, 4, 8);
+  // Sled body (wooden planks)
+  gfx.fillStyle(0x9c6530);
+  gfx.fillRect(sx - 32 + dx, sy - 8 + dy, 64, 24);
+  // Plank grooves
+  gfx.fillStyle(0x7a4d20);
+  gfx.fillRect(sx - 32 + dx, sy     + dy, 64, 2);
+  gfx.fillRect(sx - 32 + dx, sy + 8 + dy, 64, 2);
+  // Front board (upright)
+  gfx.fillStyle(0x8a5520);
+  gfx.fillRect(sx + 22 + dx, sy - 20 + dy, 8, 36);
+  // 3 children
+  const bc = celebrating
+    ? [0xff8855, 0x55ff88, 0x5588ff]
+    : [0xcc3311, 0x118833, 0x1133aa];
+  const hc = [0xdd2200, 0x009922, 0x0022bb];
+  const cxs = [sx - 19 + dx, sx + dx, sx + 19 + dx];
+  for (let i = 0; i < 3; i++) {
+    const cx2 = cxs[i];
+    const cb = celebrating ? Math.sin(Date.now() * 0.012 + i * 2.1) * 5 : 0;
+    // Jacket/body
+    gfx.fillStyle(bc[i]);
+    gfx.fillRect(cx2 - 6, sy - 17 + dy + cb, 12, 11);
+    // Head (skin)
+    gfx.fillStyle(0xffddb8);
+    gfx.fillCircle(cx2, sy - 22 + dy + cb, 5);
+    // Hat brim
+    gfx.fillStyle(0xffffff);
+    gfx.fillRect(cx2 - 7, sy - 28 + dy + cb, 14, 3);
+    // Hat top
+    gfx.fillStyle(hc[i]);
+    gfx.fillRect(cx2 - 5, sy - 39 + dy + cb, 10, 13);
+    // Arms out when celebrating
+    if (celebrating) {
+      gfx.fillStyle(bc[i]);
+      gfx.fillRect(cx2 - 14, sy - 15 + dy + cb, 8, 4);
+      gfx.fillRect(cx2 + 6,  sy - 15 + dy + cb, 8, 4);
+    }
+  }
 }
 
 // ─── Zone & separator ───────────────────────────────────────────────────────
