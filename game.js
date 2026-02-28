@@ -69,6 +69,7 @@ let initPos = 0, namingCool = 0;
 let uiObjects = [], letterTexts = [];
 let playerRank = -1;
 let speedMult = 1, speedTimer = 0;
+let titleSledX = -150, skipTitle = false;
 
 function laneCY(lane) {
   return ZY[Math.floor(lane / 4)] + (lane % 4) * SH + SH / 2;
@@ -76,7 +77,6 @@ function laneCY(lane) {
 
 function create() {
   scene = this;
-  // Reset all mutable state so scene.scene.restart() gives a clean slate
   keys = {};
   rStep = 0; rAccum = 0;
   lastObstSlot = [-1, -1, -1];
@@ -87,23 +87,31 @@ function create() {
   mooseCY = laneCY(5); sledCY = mooseCY;
   life = 10; score = 0;
   celebTimer = 0; damageTimer = 0; dmgShake = 0;
-  gameOver = false; gameState = 'playing';
+  gameOver = false; gameState = skipTitle ? 'playing' : 'title';
   heartParticles = []; heartCooldown = 0;
   floatTexts = []; uiObjects = []; letterTexts = [];
   initials = ['A', 'A', 'A']; initPos = 0; namingCool = 0;
-  playerRank = -1; speedMult = 1; speedTimer = 0;
+  playerRank = -1; speedMult = 1; speedTimer = 0; titleSledX = -150;
   gfx = this.add.graphics();
   this.input.keyboard.on('keydown', e => { keys[KEYBOARD_TO_ARCADE[e.key] || e.key] = true; });
   this.input.keyboard.on('keyup',   e => { keys[KEYBOARD_TO_ARCADE[e.key] || e.key] = false; });
-  lifeText  = this.add.text(8,   4, 'LIFE: 10', { fontSize: '15px', color: '#ff4444', fontFamily: 'monospace' });
-  scoreText = this.add.text(280, 4, 'SCORE: 0', { fontSize: '15px', color: '#ffff44', fontFamily: 'monospace' });
+  const hv = gameState !== 'title';
+  lifeText  = this.add.text(8,   4, 'LIFE: 10', { fontSize: '15px', color: '#ff4444', fontFamily: 'monospace' }).setVisible(hv);
+  scoreText = this.add.text(280, 4, 'SCORE: 0', { fontSize: '15px', color: '#ffff44', fontFamily: 'monospace' }).setVisible(hv);
+  if (gameState === 'title') showTitleScreen();
 }
 
 function update(time, delta) {
   updateFloatTexts(delta);
   if (gameState !== 'playing') {
     gfx.clear();
-    if (gameState === 'scores') {
+    if (gameState === 'title') {
+      drawTitleBg(delta);
+      if (Object.values(keys).some(v => v)) {
+        clearUI(); keys = {}; gameState = 'playing';
+        lifeText.setVisible(true); scoreText.setVisible(true);
+      }
+    } else if (gameState === 'scores') {
       drawScoresBg();
       updateScoresInput(delta);
     } else {
@@ -124,7 +132,7 @@ function update(time, delta) {
 
   // Speed difficulty: +10% every 15 s
   speedTimer += delta;
-  if (speedTimer >= 15000) { speedTimer -= 15000; speedMult *= 1.1; }
+  if (speedTimer >= 10000) { speedTimer -= 10000; speedMult *= 1.2; }
 
   // Move projectiles left; remove when fully off left edge
   projectiles = projectiles.filter(p => { p.x -= p.speed * speedMult * delta; return p.x + p.w > 0; });
@@ -174,9 +182,29 @@ function update(time, delta) {
     }
     // D_MIN ≤ dist ≤ D_MAX: slack zone — sled keeps position freely
   }
-  // Clamp sled inside play zone
+  // ── Wall push constraint ────────────────────────────────────────────────────
+  let wallPush = false;
+  for (const p of projectiles) {
+    if (!p.isWall) continue;
+    if (p.y + p.h <= sledCY - 14 || p.y >= sledCY + 14) continue; // no vertical overlap
+    const over = (sledX + 24) - (p.x - 1);
+    if (over > 0) { sledX -= over; mooseX -= over; wallPush = true; }
+  }
+  // Clamp sled and moose inside play zone
   sledX  = Math.max(5, Math.min(SEPARATOR - 80, sledX));
+  mooseX = Math.max(15, Math.min(SEPARATOR - 50, mooseX));
   sledCY = Math.max(23, Math.min(535, sledCY));
+  if (wallPush) {
+    damageTimer = 200;
+    if (heartCooldown <= 0) {
+      heartCooldown = 550;
+      life = Math.max(0, life - 4);
+      spawnHeartBreak(sledX, sledCY);
+      spawnFloatText(sledX + 20, sledCY - 45, '-4\u2665', '#ff2200');
+      if (life <= 0 && !gameOver) enterGameOver();
+    }
+    if (sledX <= 5 && !gameOver) { life = 0; enterGameOver(); }
+  }
 
   // Timers
   damageTimer -= delta; if (damageTimer < 0) damageTimer = 0;
@@ -224,10 +252,11 @@ function onStep() {
     return; // no projectile on jump beat
   }
 
+  if (rStep === 1 || rStep === 3) spawnWall();
+
   if (happy()) {
     m.bounce = -12; f.bounce = -12;
     playTone(520, 0.07, 'sine');
-    // Pick two different slots so the two goodies never overlap
     const s1 = Math.floor(Math.random() * 4);
     let s2; do { s2 = Math.floor(Math.random() * 4); } while (s2 === s1);
     spawnGoodie(m.zone, s1);
@@ -276,6 +305,18 @@ function spawnGoodie(zone, slot) {
   });
 }
 
+function spawnWall() {
+  const occ = new Set([m.zone, f.zone]);
+  const free = [0, 1, 2].filter(z => !occ.has(z));
+  if (free.length === 0) return;
+  const wallY = ZY[free[0]];
+  const wallH = ZY[free[free.length - 1]] + ZH - wallY;
+  projectiles.push({
+    x: SEPARATOR - SH, y: wallY, w: SH, h: wallH,
+    speed: SEPARATOR / 7000, isObstacle: false, isWall: true, subtype: 0
+  });
+}
+
 // ─── Player mechanics ────────────────────────────────────────────────────────
 
 function checkCollisions(delta) {
@@ -284,6 +325,7 @@ function checkCollisions(delta) {
   const sy = sledCY - 5,  sh = 22;
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
+    if (p.isWall) continue; // walls handled by push constraint above
     if (p.x + p.w < sx || p.x > sx + sw || p.y + p.h < sy || p.y > sy + sh) continue;
     if (p.isObstacle) {
       damageTimer = 200;
@@ -519,6 +561,7 @@ function drawSeparator() {
 
 function drawProjectiles() {
   for (const p of projectiles) {
+    if (p.isWall) { drawWall(p.x, p.y, p.w, p.h); continue; }
     if (p.isObstacle) {
       if (p.subtype === 0) drawBush(p.x, p.y, p.w, p.h);
       else if (p.subtype === 1) drawSnake(p.x, p.y, p.w, p.h);
@@ -631,6 +674,34 @@ function drawOpossum(x, y, w, h) {
   gfx.fillRect(x + w * 0.54, cy + h * 0.28, 7, 11);
 }
 
+// ── Wall: ice barrier with spikes ────────────────────────────────────────────
+function drawWall(x, y, w, h) {
+  const n = Math.ceil(h / SH);
+  for (let i = 0; i < n; i++) {
+    const by = y + i * SH;
+    const bh = Math.min(SH, y + h - by);
+    gfx.fillStyle(i % 2 === 0 ? 0x1a4488 : 0x2255aa);
+    gfx.fillRect(x, by, w, bh - 1);
+    gfx.fillStyle(0x66aaff, 0.35);
+    gfx.fillRect(x + 2, by + 2, w - 4, 7);
+    gfx.fillStyle(0x0a2244);
+    gfx.fillRect(x, by + bh - 1, w, 1);
+  }
+  // Right edge highlight
+  gfx.fillStyle(0x88ccff, 0.5);
+  gfx.fillRect(x + w - 3, y, 3, h);
+  // Left-facing ice spikes (dangerous side toward player)
+  gfx.fillStyle(0xcce8ff);
+  const ns = Math.ceil(h / 20);
+  for (let i = 0; i < ns; i++) {
+    const sy = y + (i + 0.5) * (h / ns);
+    gfx.fillTriangle(x, sy - 9, x, sy + 9, x - 17, sy);
+    gfx.fillStyle(0xffffff, 0.6);
+    gfx.fillTriangle(x, sy - 9, x - 5, sy - 5, x - 17, sy);
+    gfx.fillStyle(0xcce8ff);
+  }
+}
+
 // ── Goodie: gold coin ────────────────────────────────────────────────────────
 function drawCoin(x, y, w, h) {
   const cx = x + w / 2, cy = y + h / 2;
@@ -698,7 +769,7 @@ function drawHeart(x, y, w, h) {
 function drawChar(ch, cx, isFemale, forceHappy) {
   const y = ch.cy + ch.bounce;
   const h = forceHappy !== undefined ? forceHappy : happy();
-  const B = 0x7b3f00, S = 0xf4a460, D = 0x3d1f00;
+  const B = 0xc8dcff, S = 0xf0f8ff, D = 0x7799cc; // yeti ice-white fur
 
   // Shadow
   gfx.fillStyle(0x000000, 0.28);
@@ -717,8 +788,8 @@ function drawChar(ch, cx, isFemale, forceHappy) {
   gfx.fillStyle(S);
   gfx.fillEllipse(cx, y + 5, 36, 42);
 
-  // Tie
-  gfx.fillStyle(h ? 0xff3333 : 0x770000);
+  // Scarf / tie
+  gfx.fillStyle(h ? 0x44aaff : 0x1155aa);
   gfx.fillTriangle(cx - 5, y - 7, cx + 5, y - 7, cx, y + 17);
 
   // Arms
@@ -754,13 +825,16 @@ function drawChar(ch, cx, isFemale, forceHappy) {
   gfx.fillCircle(cx - 6, y - 23, 2);
   gfx.fillCircle(cx + 6, y - 23, 2);
 
-  // Eyes
+  // Eyes — blue when happy, red when angry (yeti trait)
   gfx.fillStyle(0xffffff);
   gfx.fillCircle(cx - 11, y - 44, 7);
   gfx.fillCircle(cx + 11, y - 44, 7);
+  gfx.fillStyle(h ? 0x44aaff : 0xff2200);
+  gfx.fillCircle(cx - 11, h ? y - 43 : y - 46, 5);
+  gfx.fillCircle(cx + 11, h ? y - 43 : y - 46, 5);
   gfx.fillStyle(0x111111);
-  gfx.fillCircle(cx - 11, h ? y - 43 : y - 46, 4);
-  gfx.fillCircle(cx + 11, h ? y - 43 : y - 46, 4);
+  gfx.fillCircle(cx - 11, h ? y - 43 : y - 46, 2);
+  gfx.fillCircle(cx + 11, h ? y - 43 : y - 46, 2);
 
   // Eyebrows
   gfx.fillStyle(D);
@@ -780,14 +854,58 @@ function drawChar(ch, cx, isFemale, forceHappy) {
     gfx.fillRect(cx - 8 + i * 4, my, 3, 3);
   }
 
-  // Female: bow / moño
+  // Female yeti: ice crystal crown
   if (isFemale) {
-    gfx.fillStyle(0xff69b4);
-    gfx.fillEllipse(cx - 13, y - 67, 20, 14);
-    gfx.fillEllipse(cx + 13, y - 67, 20, 14);
-    gfx.fillStyle(0xff1493);
-    gfx.fillCircle(cx, y - 67, 6);
+    gfx.fillStyle(0xaaddff);
+    gfx.fillTriangle(cx - 4, y - 65, cx, y - 86, cx + 4, y - 65);
+    gfx.fillTriangle(cx - 14, y - 65, cx - 10, y - 80, cx - 5, y - 65);
+    gfx.fillTriangle(cx + 5, y - 65, cx + 10, y - 80, cx + 14, y - 65);
+    gfx.fillStyle(0xeef8ff, 0.85);
+    gfx.fillCircle(cx, y - 86, 3);
+    gfx.fillCircle(cx - 10, y - 80, 2);
+    gfx.fillCircle(cx + 10, y - 80, 2);
   }
+}
+
+// ─── Title screen ─────────────────────────────────────────────────────────────
+
+function showTitleScreen() {
+  clearUI();
+  const mk = (x, y, t, sz, col) => {
+    const o = scene.add.text(x, y, t, {
+      fontSize: sz + 'px', color: col, fontFamily: 'monospace',
+      stroke: '#000033', strokeThickness: 3
+    }).setOrigin(0.5);
+    uiObjects.push(o); return o;
+  };
+  mk(400, 82, 'Yeti-Aventuras', 54, '#aaddff');
+  mk(400, 388, 'Presiona un bot\u00f3n para iniciar', 18, '#ffffff');
+}
+
+function drawTitleBg(delta) {
+  titleSledX += delta * 0.18;
+  if (titleSledX > 920) titleSledX = -180;
+  const t = Date.now();
+  gfx.fillStyle(0x050a18, 1);
+  gfx.fillRect(0, 0, 800, 600);
+  // Stars
+  for (let i = 0; i < 50; i++) {
+    const sx = (i * 97 + 43) % 800, sy = (i * 53 + 17) % 420;
+    gfx.fillStyle(0xffffff, Math.sin(t * 0.002 + i) * 0.4 + 0.6);
+    gfx.fillRect(sx, sy, 2, 2);
+  }
+  // Snow ground
+  gfx.fillStyle(0xddeeff); gfx.fillRect(0, 480, 800, 120);
+  gfx.fillStyle(0xffffff); gfx.fillEllipse(400, 481, 920, 28);
+  // Yetis beside the title (happy, bouncing)
+  const lb = Math.sin(t * 0.0035) * 8;
+  const rb = Math.sin(t * 0.0035 + 1.6) * 8;
+  drawChar({ cy: 185 + lb, punch: 0, bounce: 0 }, 82, false, true);
+  drawChar({ cy: 185 + rb, punch: 0, bounce: 0 }, 718, true, true);
+  // Cycling moose + sled on snow
+  const cY = 447;
+  drawSled(titleSledX, cY, true, 0);
+  drawMoose(titleSledX + 92, cY);
 }
 
 // ─── Scores screen background ────────────────────────────────────────────────
@@ -1020,6 +1138,7 @@ function updateScoresInput(delta) {
 }
 
 function doRestart() {
+  skipTitle = true;
   floatTexts = []; uiObjects = []; letterTexts = [];
   scene.scene.restart();
 }
