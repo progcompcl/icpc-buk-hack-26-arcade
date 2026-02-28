@@ -1,436 +1,1202 @@
-// Minimalist Pong - 1P vs AI or 2P mode
-// Controls: P1 uses W/S, P2 uses Arrow Up/Down
+// Rhythm Gorillas
 
 const ARCADE_CONTROLS = {
-  'P1U': ['w'], 'P1D': ['s'],
-  'P2U': ['ArrowUp'], 'P2D': ['ArrowDown'],
+  'P1U': ['w'], 'P1D': ['s'], 'P1L': ['a'], 'P1R': ['d'],
+  'P2U': ['ArrowUp'], 'P2D': ['ArrowDown'], 'P2L': ['ArrowLeft'], 'P2R': ['ArrowRight'],
   'P1A': ['u'], 'P2A': ['r'],
   'START1': ['1', 'Enter'], 'START2': ['2']
 };
-
 const KEYBOARD_TO_ARCADE = {};
-for (const [code, keys] of Object.entries(ARCADE_CONTROLS)) {
-  keys.forEach(k => KEYBOARD_TO_ARCADE[k] = code);
+for (const [code, ks] of Object.entries(ARCADE_CONTROLS)) {
+  ks.forEach(k => KEYBOARD_TO_ARCADE[k] = code);
 }
 
 const config = {
   type: Phaser.AUTO,
   width: 800,
   height: 600,
-  backgroundColor: '#000000',
+  backgroundColor: '#0d0d1a',
   scene: { create, update }
 };
-
 const game = new Phaser.Game(config);
 
-// Game state
-let state = 'menu'; // menu, playing, gameover
-let players = 1;
-let gfx, p1, p2, ball;
-let score1 = 0, score2 = 0;
+let gfx, scene;
 let keys = {};
-let winScore = 5;
-let beatInterval, scene;
-let particles = [];
 
-// Paddle & ball settings
-const PW = 12, PH = 80, PS = 6;
-const BR = 8, BS = 3;
+// Rhythm — 2 steps per second
+const RSTEP = 500;
+let rStep = 0, rAccum = 0;
+
+// Layout
+// Male gorilla at cx=672: leftmost point at rest = 672-57 = 615
+// Separator at 612 → 3px margin, gorillas always to the RIGHT
+const SEPARATOR = 612;
+const ZH = 186;              // 558 / 3
+const ZY = [0, 186, 372];   // top-y of each zone
+const SH = Math.floor(ZH / 4);          // slot height = 46px (4 slots per zone)
+let lastObstSlot = [-1, -1, -1];        // last obstacle slot used per zone index
+
+function zCY(z) { return ZY[z] + ZH / 2; }
+
+// Characters (right of separator)
+let m = { zone: 0, cy: zCY(0), targetCY: zCY(0), punch: 0, bounce: 0 };
+let f = { zone: 2, cy: zCY(2), targetCY: zCY(2), punch: 0, bounce: 0 };
+
+function happy() { return m.zone === f.zone; }
+
+// Projectiles: obstacles (angry) and goodies (happy)
+// Each: { x, y, w, h, speed, isObstacle, subtype }
+// Start with right edge at SEPARATOR, travel left for 7 s.
+// Distance = SEPARATOR px, speed = SEPARATOR/7000 px/ms (constant).
+let projectiles = [];
+
+// ── Player (Moose + Sled) ────────────────────────────────────────────────────
+const MOVE_CD = 160;
+const D_MIN = 45;          // collision radius (push boundary)
+const D_MAX = 2 * SH;      // max rope length = 2 lane slots ≈ 92 px
+let mooseX = 132, sledX = 50;
+let mooseLane = 5, mooseCY = 0, mooseMCool = 0, mooseHCool = 0, mooseFlyTimer = 0;
+let sledCY = 0;
+let life = 3, score = 0;
+let celebTimer = 0, damageTimer = 0, dmgShake = 0;
+let gameOver = false;
+let lifeText, scoreText;
+let heartParticles = [], heartCooldown = 0;
+let floatTexts = [];
+let gameState = 'playing'; // 'playing' | 'naming' | 'scores'
+let initials = ['A', 'A', 'A'];
+let initPos = 0, namingCool = 0;
+let uiObjects = [], letterTexts = [];
+let playerRank = -1;
+let speedMult = 1, speedTimer = 0;
+let titleSledX = -150, skipTitle = false;
+let introBeat = 0;
+
+function laneCY(lane) {
+  return ZY[Math.floor(lane / 4)] + (lane % 4) * SH + SH / 2;
+}
 
 function create() {
   scene = this;
+  keys = {};
+  rStep = 0; rAccum = 0;
+  lastObstSlot = [-1, -1, -1];
+  m = { zone: 1, cy: zCY(1), targetCY: zCY(1), punch: 0, bounce: 0 };
+  f = { zone: 1, cy: zCY(1), targetCY: zCY(1), punch: 0, bounce: 0 };
+  projectiles = [];
+  mooseX = 132; sledX = 50; mooseLane = 5; mooseMCool = 0; mooseHCool = 0; mooseFlyTimer = 0;
+  mooseCY = laneCY(5); sledCY = mooseCY;
+  life = 10; score = 0;
+  celebTimer = 0; damageTimer = 0; dmgShake = 0;
+  gameOver = false; gameState = skipTitle ? 'playing' : 'title';
+  heartParticles = []; heartCooldown = 0;
+  floatTexts = []; uiObjects = []; letterTexts = [];
+  initials = ['A', 'A', 'A']; initPos = 0; namingCool = 0;
+  playerRank = -1; speedMult = 1; speedTimer = 0; titleSledX = -150; introBeat = 0;
   gfx = this.add.graphics();
-  resetGame();
-  
-  this.input.keyboard.on('keydown', e => {
-    const k = KEYBOARD_TO_ARCADE[e.key] || e.key;
-    keys[k] = true;
-    
-    if (state === 'menu') {
-      if (k === 'P1U' || k === 'P2U') { players = 1; }
-      if (k === 'P1D' || k === 'P2D') { players = 2; }
-      if (k === 'START1' || k === 'P1A') { startGame(); }
-    } else if (state === 'gameover') {
-      if (k === 'START1' || k === 'P1A') { state = 'menu'; resetGame(); }
-    }
-  });
-  
-  this.input.keyboard.on('keyup', e => {
-    const k = KEYBOARD_TO_ARCADE[e.key] || e.key;
-    keys[k] = false;
-  });
-}
-
-function resetGame() {
-  p1 = { x: 30, y: 300 - PH/2 };
-  p2 = { x: 770 - PW, y: 300 - PH/2 };
-  score1 = 0; score2 = 0;
-  resetBall(1);
-}
-
-function resetBall(dir) {
-  ball = { 
-    x: 400, y: 300, 
-    vx: BS * dir, 
-    vy: (Math.random() - 0.5) * BS * 1.5 
-  };
-}
-
-function startGame() {
-  state = 'playing';
-  resetGame();
-  startBeat();
-}
-
-function stopBeat() {
-  if (beatInterval) {
-    clearInterval(beatInterval);
-    beatInterval = null;
-  }
-}
-
-function startBeat() {
-  stopBeat();
-  let beat = 0;
-  beatInterval = setInterval(() => {
-    if (state !== 'playing') { stopBeat(); return; }
-    const b = beat % 16;
-    // Kick on 0, 4, 8, 12
-    if (b % 4 === 0) playTone(scene, 150, 0.08);
-    // Hi-hat on offbeats
-    if (b % 2 === 1) playTone(scene, 1200, 0.02);
-    // Snare on 4, 12
-    if (b === 4 || b === 12) playTone(scene, 250, 0.06);
-    // Bass line melody
-    const bass = [300, 0, 300, 0, 400, 0, 350, 0, 300, 0, 300, 0, 450, 0, 400, 0];
-    if (bass[b]) playTone(scene, bass[b], 0.1);
-    beat++;
-  }, 150);
+  this.input.keyboard.on('keydown', e => { keys[KEYBOARD_TO_ARCADE[e.key] || e.key] = true; });
+  this.input.keyboard.on('keyup',   e => { keys[KEYBOARD_TO_ARCADE[e.key] || e.key] = false; });
+  const hv = gameState !== 'title';
+  lifeText  = this.add.text(8,   4, 'LIFE: 10', { fontSize: '15px', color: '#ff4444', fontFamily: 'monospace' }).setVisible(hv);
+  scoreText = this.add.text(280, 4, 'SCORE: 0', { fontSize: '15px', color: '#ffff44', fontFamily: 'monospace' }).setVisible(hv);
+  if (gameState === 'title') showTitleScreen();
 }
 
 function update(time, delta) {
-  gfx.clear();
-  
-  if (state === 'menu') {
-    drawMenu();
-  } else if (state === 'playing') {
-    updateGame(delta);
-    drawGame();
-  } else if (state === 'gameover') {
-    drawGameOver();
-  }
-}
-
-function drawMenu() {
-  // Title with glow effect
-  gfx.fillStyle(0xffffff);
-  drawText(gfx, 'PONG', 400, 120, 5);
-  
-  // Subtitle
-  gfx.fillStyle(0x00ffff);
-  drawText(gfx, 'ARCADE EDITION', 400, 200, 1.5);
-  
-  // Mode selection with better spacing
-  const c1 = players === 1 ? 0x00ff00 : 0x555555;
-  const c2 = players === 2 ? 0x00ff00 : 0x555555;
-  
-  gfx.fillStyle(c1);
-  drawText(gfx, '1 PLAYER', 400, 300, 2.5);
-  gfx.fillStyle(c2);
-  drawText(gfx, '2 PLAYERS', 400, 370, 2.5);
-  
-  // Arrow indicator
-  const arrowY = players === 1 ? 300 : 370;
-  gfx.fillStyle(0x00ff00);
-  gfx.fillTriangle(150, arrowY + 15, 150, arrowY + 35, 170, arrowY + 25);
-  gfx.fillTriangle(650, arrowY + 15, 650, arrowY + 35, 630, arrowY + 25);
-  
-  // Instructions with better spacing
-  gfx.fillStyle(0x999999);
-  drawText(gfx, 'USE UP DOWN TO SELECT', 400, 480, 1.2);
-  gfx.fillStyle(0xffff00);
-  drawText(gfx, 'PRESS START', 400, 530, 1.5);
-}
-
-function updateGame(delta) {
-  // P1 movement
-  if (keys['P1U'] && p1.y > 0) p1.y -= PS;
-  if (keys['P1D'] && p1.y < 600 - PH) p1.y += PS;
-  
-  // P2 movement (AI or player)
-  if (players === 2) {
-    if (keys['P2U'] && p2.y > 0) p2.y -= PS;
-    if (keys['P2D'] && p2.y < 600 - PH) p2.y += PS;
-  } else {
-    // Simple AI: follow ball with some delay
-    const center = p2.y + PH/2;
-    const diff = ball.y - center;
-    if (Math.abs(diff) > 10) {
-      p2.y += Math.sign(diff) * (PS * 0.7);
+  updateFloatTexts(delta);
+  if (gameState !== 'playing') {
+    gfx.clear();
+    if (gameState === 'title') {
+      drawTitleBg(delta);
+      if (Object.values(keys).some(v => v)) {
+        clearUI(); keys = {}; gameState = 'playing';
+        lifeText.setVisible(true); scoreText.setVisible(true);
+      }
+    } else if (gameState === 'scores') {
+      drawScoresBg();
+      updateScoresInput(delta);
+    } else {
+      drawZones();
+      drawSeparator();
+      drawRhythmBar();
+      if (gameState === 'naming') updateNaming(delta);
     }
-    p2.y = Math.max(0, Math.min(600 - PH, p2.y));
+    return;
   }
-  
-  // Ball movement
-  ball.x += ball.vx;
-  ball.y += ball.vy;
-  
-  // Top/bottom bounce
-  if (ball.y <= BR || ball.y >= 600 - BR) {
-    ball.vy *= -1;
-    ball.y = ball.y <= BR ? BR : 600 - BR;
-    playWallHit(this);
-    createParticles(ball.x, ball.y, 0x00ffff);
-  }
-  
-  // Paddle collision P1
-  if (ball.x - BR <= p1.x + PW && ball.x + BR >= p1.x &&
-      ball.y >= p1.y && ball.y <= p1.y + PH && ball.vx < 0) {
-    ball.vx *= -1.08;
-    ball.vy += ((ball.y - (p1.y + PH/2)) / PH) * 3;
-    ball.x = p1.x + PW + BR;
-    playPaddleHit(this);
-    createParticles(ball.x, ball.y, 0x00ff00);
-  }
-  
-  // Paddle collision P2
-  if (ball.x + BR >= p2.x && ball.x - BR <= p2.x + PW &&
-      ball.y >= p2.y && ball.y <= p2.y + PH && ball.vx > 0) {
-    ball.vx *= -1.08;
-    ball.vy += ((ball.y - (p2.y + PH/2)) / PH) * 3;
-    ball.x = p2.x - BR;
-    playPaddleHit(this);
-    createParticles(ball.x, ball.y, 0xff00ff);
-  }
-  
-  // Speed limit
-  ball.vx = Math.sign(ball.vx) * Math.min(Math.abs(ball.vx), 12);
-  ball.vy = Math.sign(ball.vy) * Math.min(Math.abs(ball.vy), 8);
-  
-  // Score
-  if (ball.x < 0) {
-    score2++;
-    playScoreSound(this);
-    if (score2 >= winScore) { state = 'gameover'; stopBeat(); }
-    else { resetBall(-1); }
-  }
-  if (ball.x > 800) {
-    score1++;
-    playScoreSound(this);
-    if (score1 >= winScore) { state = 'gameover'; stopBeat(); }
-    else { resetBall(1); }
-  }
-}
 
-function drawGame() {
-  // Update and draw particles
-  particles = particles.filter(p => {
-    p.x += p.vx;
-    p.y += p.vy;
-    p.life--;
-    if (p.life > 0) {
-      const alpha = p.life / 20;
-      gfx.fillStyle(p.color, alpha);
-      gfx.fillCircle(p.x, p.y, p.size);
-      return true;
+  rAccum += delta;
+  const effectiveRSTEP = RSTEP / speedMult;
+  if (rAccum >= effectiveRSTEP) {
+    rAccum -= effectiveRSTEP;
+    rStep = (rStep + 1) % 4;
+    onStep();
+  }
+
+  // Speed difficulty: +10% every 15 s
+  speedTimer += delta;
+  if (speedTimer >= 10000) { speedTimer -= 10000; speedMult *= 1.15; }
+
+  // Move projectiles left; remove when fully off left edge
+  projectiles = projectiles.filter(p => { p.x -= p.speed * speedMult * delta; return p.x + p.w > 0; });
+
+  m.cy += (m.targetCY - m.cy) * 0.1;
+  f.cy += (f.targetCY - f.cy) * 0.1;
+  m.punch *= 0.72; f.punch *= 0.72;
+  m.bounce *= 0.72; f.bounce *= 0.72;
+
+  // Moose vertical input (ArrowUp/Down or W/S)
+  mooseMCool -= delta;
+  if (mooseMCool <= 0) {
+    if ((keys['P2U'] || keys['P1U']) && mooseLane > 0) {
+      mooseLane--; mooseMCool = MOVE_CD;
+    } else if ((keys['P2D'] || keys['P1D']) && mooseLane < 11) {
+      mooseLane++; mooseMCool = MOVE_CD;
     }
-    return false;
-  });
-  
-  // Center line
-  gfx.fillStyle(0x333333);
-  for (let y = 0; y < 600; y += 30) {
-    gfx.fillRect(398, y, 4, 15);
   }
-  
-  // Paddles with glow
-  gfx.fillStyle(0x00ff00, 0.3);
-  gfx.fillRect(p1.x - 2, p1.y - 2, PW + 4, PH + 4);
-  gfx.fillStyle(0xff00ff, 0.3);
-  gfx.fillRect(p2.x - 2, p2.y - 2, PW + 4, PH + 4);
-  
-  gfx.fillStyle(0xffffff);
-  gfx.fillRect(p1.x, p1.y, PW, PH);
-  gfx.fillRect(p2.x, p2.y, PW, PH);
-  
-  // Ball with glow
-  gfx.fillStyle(0xffffff, 0.3);
-  gfx.fillCircle(ball.x, ball.y, BR + 3);
-  gfx.fillStyle(0xffffff);
-  gfx.fillCircle(ball.x, ball.y, BR);
-  
-  // Score with glow
-  gfx.fillStyle(0x00ff00);
-  drawText(gfx, score1.toString(), 300, 40, 4);
-  gfx.fillStyle(0xff00ff);
-  drawText(gfx, score2.toString(), 500, 40, 4);
-  
-  // Player labels
-  gfx.fillStyle(0x00ff00);
-  drawText(gfx, 'P1', 60, 30, 1.2);
-  gfx.fillStyle(0xff00ff);
-  drawText(gfx, players === 1 ? 'AI' : 'P2', 720, 30, 1.2);
-}
 
-function drawGameOver() {
-  const winner = score1 >= winScore ? 'P1' : (players === 1 ? 'AI' : 'P2');
-  
-  gfx.fillStyle(0xff0000);
-  drawText(gfx, 'GAME OVER', 400, 200, 3);
-  
-  gfx.fillStyle(0x00ff00);
-  drawText(gfx, winner + ' WINS', 400, 300, 2);
-  
-  gfx.fillStyle(0xffffff);
-  drawText(gfx, score1 + ' - ' + score2, 400, 380, 2);
-  
-  gfx.fillStyle(0x888888);
-  drawText(gfx, 'PRESS START', 400, 480, 1);
-}
-
-// Simple pixel text renderer
-function drawText(g, text, x, y, size) {
-  const chars = {
-    'A': [0x7C,0x92,0x92,0x7C,0x92], 'B': [0xFE,0x92,0x92,0x6C,0x00],
-    'C': [0x7C,0x82,0x82,0x44,0x00], 'D': [0xFE,0x82,0x82,0x7C,0x00],
-    'E': [0xFE,0x92,0x92,0x82,0x00], 'G': [0x7C,0x82,0x92,0x74,0x00],
-    'I': [0x00,0x82,0xFE,0x82,0x00], 'L': [0xFE,0x80,0x80,0x80,0x00],
-    'M': [0xFE,0x04,0x18,0x04,0xFE], 'N': [0xFE,0x08,0x10,0x20,0xFE],
-    'O': [0x7C,0x82,0x82,0x7C,0x00], 'P': [0xFE,0x12,0x12,0x0C,0x00],
-    'R': [0xFE,0x12,0x32,0xCC,0x00], 'S': [0x64,0x92,0x92,0x4C,0x00],
-    'T': [0x02,0x02,0xFE,0x02,0x02], 'U': [0x7E,0x80,0x80,0x7E,0x00],
-    'V': [0x3E,0x40,0x80,0x40,0x3E], 'W': [0x7E,0x80,0x70,0x80,0x7E],
-    'Y': [0x06,0x08,0xF0,0x08,0x06],
-    '0': [0x7C,0xA2,0x92,0x8A,0x7C], '1': [0x00,0x84,0xFE,0x80,0x00],
-    '2': [0xC4,0xA2,0x92,0x8C,0x00], '3': [0x44,0x92,0x92,0x6C,0x00],
-    '4': [0x1E,0x10,0xFE,0x10,0x00], '5': [0x4E,0x8A,0x8A,0x72,0x00],
-    '6': [0x7C,0x92,0x92,0x64,0x00], '7': [0x02,0xE2,0x12,0x0E,0x00],
-    '8': [0x6C,0x92,0x92,0x6C,0x00], '9': [0x4C,0x92,0x92,0x7C,0x00],
-    ' ': [0x00,0x00,0x00,0x00,0x00], '-': [0x10,0x10,0x10,0x10,0x00]
-  };
-  
-  const spacing = 7 * size;
-  let startX = x - (text.length * spacing) / 2;
-  
-  for (let c of text) {
-    const data = chars[c];
-    if (data) {
-      for (let col = 0; col < 5; col++) {
-        for (let row = 0; row < 8; row++) {
-          if (data[col] & (1 << row)) {
-            g.fillRect(startX + col * size, y + row * size, size - 1, size - 1);
-          }
-        }
+  // Moose horizontal input (ArrowLeft/Right or A/D)
+  mooseHCool -= delta;
+  if (mooseHCool <= 0) {
+    if ((keys['P2R'] || keys['P1R']) && mooseX < SEPARATOR - 50) {
+      mooseX += 25; mooseHCool = MOVE_CD;
+    } else if ((keys['P2L'] || keys['P1L']) && mooseX > 15) {
+      mooseX -= 25; mooseHCool = MOVE_CD;
+    }
+  }
+  // ── 2D Tether physics ───────────────────────────────────────────────────────
+  mooseCY += (laneCY(mooseLane) - mooseCY) * 0.15;
+  {
+    const rdx = mooseX - sledX;
+    const rdy = mooseCY - sledCY;
+    const dist = Math.sqrt(rdx * rdx + rdy * rdy);
+    if (dist > 0.5) {
+      if (dist > D_MAX) {
+        // Rope taut — drag sled toward moose
+        const pull = (dist - D_MAX) / dist;
+        sledX  += rdx * pull;
+        sledCY += rdy * pull;
+      } else if (dist < D_MIN) {
+        // Collision — push sled away from moose (in moose's travel direction)
+        const push = (D_MIN - dist) / dist;
+        sledX  -= rdx * push;
+        sledCY -= rdy * push;
       }
     }
-    startX += spacing;
+    // D_MIN ≤ dist ≤ D_MAX: slack zone — sled keeps position freely
+  }
+  // ── Wall push constraint ────────────────────────────────────────────────────
+  let wallPush = false;
+  for (const p of projectiles) {
+    if (!p.isWall) continue;
+    if (p.y + p.h <= sledCY - 14 || p.y >= sledCY + 14) continue; // no vertical overlap
+    if (p.x + p.w <= sledX - 24) continue;    // wall already fully passed sled (left)
+    if (p.x >= sledX + 24) continue;           // wall hasn't reached sled yet (right)
+    const over = (sledX + 24) - p.x;
+    if (over > 0) { sledX -= over; mooseX -= over; wallPush = true; }
+  }
+  // Clamp sled and moose inside play zone
+  sledX  = Math.max(5, Math.min(SEPARATOR - 80, sledX));
+  mooseX = Math.max(15, Math.min(SEPARATOR - 50, mooseX));
+  sledCY = Math.max(23, Math.min(535, sledCY));
+  if (wallPush) {
+    damageTimer = 200;
+    mooseFlyTimer = 80; // se refresca cada frame que hay contacto → vuela solo mientras toca
+    if (heartCooldown <= 0) {
+      heartCooldown = 550;
+      life = Math.max(0, life - 1);
+      spawnHeartBreak(sledX, sledCY);
+      spawnFloatText(sledX + 20, sledCY - 45, '-1\u2665', '#ff2200');
+      if (life <= 0 && !gameOver) enterGameOver();
+    }
+    if (sledX <= 5 && !gameOver) { life = 0; enterGameOver(); }
+  }
+
+  // Timers
+  damageTimer -= delta; if (damageTimer < 0) damageTimer = 0;
+  celebTimer  -= delta; if (celebTimer  < 0) celebTimer  = 0;
+  heartCooldown -= delta; if (heartCooldown < 0) heartCooldown = 0;
+  mooseFlyTimer -= delta; if (mooseFlyTimer < 0) mooseFlyTimer = 0;
+  dmgShake = damageTimer > 0 ? (Math.random() - 0.5) * 8 : 0;
+
+  // Update heart particles
+  for (let i = heartParticles.length - 1; i >= 0; i--) {
+    const hp = heartParticles[i];
+    hp.x += hp.vx; hp.y += hp.vy; hp.vy += 0.08; hp.alpha -= 0.025;
+    if (hp.alpha <= 0) { heartParticles.splice(i, 1); }
+  }
+
+  // Collisions
+  checkCollisions(delta);
+
+  // HUD
+  lifeText.setText('LIFE: ' + life);
+  scoreText.setText('SCORE: ' + score);
+
+  gfx.clear();
+  drawZones();
+  drawProjectiles();
+  drawRope();
+  drawSled(sledX, sledCY, celebTimer > 0, dmgShake);
+  // Draw breaking hearts on top of sled
+  for (const hp of heartParticles) { drawBrokenHeart(hp.x, hp.y, hp.r, hp.alpha); }
+  drawMoose(mooseX, mooseCY, mooseFlyTimer > 0);
+  drawSeparator();
+  drawChar(m, 672, false);
+  drawChar(f, 742, true);
+  drawRhythmBar();
+}
+
+function onStep() {
+  // ── Intro phase: first 2 full cycles ──────────────────────────────────────
+  if (introBeat < 8) {
+    introBeat++;
+    if (rStep === 0) {
+      // Keep both yetis dancing in center zone
+      m.zone = 1; f.zone = 1;
+      m.targetCY = zCY(1); f.targetCY = zCY(1);
+      m.bounce = -32; f.bounce = -32;
+      playTone(180, 0.09, 'sine');
+      score += 10; celebTimer = 1200;
+      spawnFloatText(sledX, sledCY - 62, '+10', '#ffee00');
+      playJingle();
+    } else {
+      // Goodies in all 3 zones, random non-repeating slots
+      m.bounce = -12; f.bounce = -12;
+      playTone(520, 0.07, 'sine');
+      const used = new Set();
+      for (let z = 0; z < 3; z++) {
+        let s; do { s = Math.floor(Math.random() * 4); } while (used.has(s));
+        used.add(s);
+        spawnGoodie(z, s);
+      }
+    }
+    return;
+  }
+
+  // ── Normal play ────────────────────────────────────────────────────────────
+  if (rStep === 0) {
+    m.zone = Math.floor(Math.random() * 3);
+    f.zone = Math.floor(Math.random() * 3);
+    m.targetCY = zCY(m.zone);
+    f.targetCY = zCY(f.zone);
+    m.bounce = -32; f.bounce = -32;
+    playTone(180, 0.09, 'sine');
+    score += 10; celebTimer = 1200;
+    spawnFloatText(sledX, sledCY - 62, '+10', '#ffee00');
+    playJingle();
+    return;
+  }
+
+  if (rStep === 1) spawnWall();
+
+  if (happy()) {
+    m.bounce = -12; f.bounce = -12;
+    playTone(520, 0.07, 'sine');
+    const s1 = Math.floor(Math.random() * 4);
+    let s2; do { s2 = Math.floor(Math.random() * 4); } while (s2 === s1);
+    spawnGoodie(m.zone, s1);
+    spawnGoodie(f.zone, s2);
+  } else {
+    m.punch = 22; f.punch = 22;
+    playTone(90, 0.11, 'sawtooth');
+    spawnObstacle(m.zone);
+    spawnObstacle(f.zone);
   }
 }
 
-function playTone(scene, freq, dur) {
+// Obstacle: height = SH (ZH/4), width = 1x–3x height.
+// 4 slots per zone; consecutive spawns never reuse the same slot.
+// Starts with right edge flush at SEPARATOR, travels left in 7 s.
+function spawnObstacle(zone) {
+  const h = SH;
+  const w = Math.floor(h * (1 + Math.random() * 2));
+  let slot;
+  do { slot = Math.floor(Math.random() * 4); }
+  while (slot === lastObstSlot[zone]);
+  lastObstSlot[zone] = slot;
+  projectiles.push({
+    x: SEPARATOR - w,
+    y: ZY[zone] + slot * SH,
+    w, h,
+    speed: SEPARATOR / 7000,
+    isObstacle: true,
+    subtype: Math.floor(Math.random() * 3)
+  });
+}
+
+// Goodie: half the current size (ZH/6 ≈ 31 px), centered in its slot.
+// slot is chosen externally so two same-step goodies are always in different slots.
+function spawnGoodie(zone, slot) {
+  const h = Math.floor(ZH / 6);   // ≈ 31 px (half of old ZH/3 = 62)
+  const w = h;
+  const padding = Math.floor((SH - h) / 2); // center vertically within slot
+  projectiles.push({
+    x: SEPARATOR - w,
+    y: ZY[zone] + slot * SH + padding,
+    w, h,
+    speed: SEPARATOR / 7000,
+    isObstacle: false,
+    subtype: Math.floor(Math.random() * 3)
+  });
+}
+
+function spawnWall() {
+  const occ = new Set([m.zone, f.zone]);
+  const free = [0, 1, 2].filter(z => !occ.has(z));
+  if (free.length === 0) return;
+  for (const z of free) {
+    // gap=0 → hueco en slot 3 (abajo); gap=1 → hueco en slot 0 (arriba)
+    const gap = Math.random() < 0.5 ? 0 : 1;
+    projectiles.push({
+      x: SEPARATOR - SH, y: ZY[z] + gap * SH, w: SH, h: 3 * SH,
+      speed: SEPARATOR / 7000, isObstacle: false, isWall: true, subtype: 0
+    });
+  }
+}
+
+// ─── Player mechanics ────────────────────────────────────────────────────────
+
+function checkCollisions(delta) {
+  // Hitbox: just the wooden sled planks — no children, not too strict
+  const sx = sledX - 24, sw = 48;
+  const sy = sledCY - 5,  sh = 22;
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+    if (p.isWall) continue; // walls handled by push constraint above
+    if (p.x + p.w < sx || p.x > sx + sw || p.y + p.h < sy || p.y > sy + sh) continue;
+    if (p.isObstacle) {
+      damageTimer = 200;
+      mooseFlyTimer = 80; // se refresca cada frame que hay contacto → vuela solo mientras toca
+      if (heartCooldown <= 0) {
+        heartCooldown = 550;
+        life = Math.max(0, life - 4);
+        spawnHeartBreak(sledX, sledCY);
+        spawnFloatText(sledX + (Math.random() - 0.5) * 30, sledCY - 45, '-4\u2665', '#ff4444');
+        if (life <= 0 && !gameOver) enterGameOver();
+      }
+    } else {
+      let txt;
+      if (p.subtype === 2) { life = Math.min(99, life + 10); txt = '+10\u2665'; }
+      else { score += 10; txt = '+10'; }
+      spawnFloatText(p.x + p.w / 2, p.y + p.h / 2, txt,
+        p.subtype === 2 ? '#ff88aa' : '#ffff44');
+      celebTimer = 300;
+      playTone(880, 0.1, 'sine');
+      projectiles.splice(i, 1);
+    }
+  }
+}
+
+function drawRope() {
+  const rdx = mooseX - sledX;
+  const rdy = mooseCY - sledCY;
+  const dist = Math.sqrt(rdx * rdx + rdy * rdy);
+  if (dist <= D_MIN) return; // collapsed — they're touching
+
+  // Attachment points on the near side of each character
+  const side = rdx >= 0 ? 1 : -1;
+  const x1 = sledX  + side * 33, y1 = sledCY;
+  const x2 = mooseX - side * 28, y2 = mooseCY;
+
+  if (dist >= D_MAX) {
+    // Tense: straight dark line
+    gfx.lineStyle(2, 0x554433, 1);
+    gfx.beginPath();
+    gfx.moveTo(x1, y1);
+    gfx.lineTo(x2, y2);
+    gfx.strokePath();
+  } else {
+    // Slack: quadratic-bezier, control point pulled down by gravity
+    const t = (dist - D_MIN) / (D_MAX - D_MIN); // 0=most slack, 1=taut
+    const sag = (1 - t) * 20;
+    const cpx = (x1 + x2) * 0.5;
+    const cpy = (y1 + y2) * 0.5 + sag;
+    gfx.lineStyle(2, 0xaa6600, 1);
+    gfx.beginPath();
+    gfx.moveTo(x1, y1);
+    for (let i = 1; i <= 8; i++) {
+      const f = i / 8;
+      gfx.lineTo(
+        (1-f)*(1-f)*x1 + 2*(1-f)*f*cpx + f*f*x2,
+        (1-f)*(1-f)*y1 + 2*(1-f)*f*cpy + f*f*y2
+      );
+    }
+    gfx.strokePath();
+  }
+}
+
+function spawnHeartBreak(sx, sy) {
+  const cxs = [sx - 19, sx, sx + 19];
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 2; j++) {
+      heartParticles.push({
+        x: cxs[i] + (Math.random() - 0.5) * 10,
+        y: sy - 22 + (Math.random() - 0.5) * 6,
+        vx: (Math.random() - 0.5) * 3,
+        vy: -1.5 - Math.random() * 2,
+        alpha: 0.9,
+        r: 3 + Math.random() * 3
+      });
+    }
+  }
+}
+
+function drawBrokenHeart(x, y, r, alpha) {
+  // Left half: one bump + left half of triangle
+  gfx.fillStyle(0xff0000, alpha);
+  gfx.fillCircle(x - r * 0.7 - 2, y - r * 0.3, r * 0.6);
+  gfx.fillTriangle(
+    x - r * 1.3 - 2, y - r * 0.2,
+    x - 2,           y - r * 0.2,
+    x - 2,           y + r * 1.1
+  );
+  // Right half: one bump + right half of triangle
+  gfx.fillCircle(x + r * 0.7 + 2, y - r * 0.3, r * 0.6);
+  gfx.fillTriangle(
+    x + 2,           y - r * 0.2,
+    x + r * 1.3 + 2, y - r * 0.2,
+    x + 2,           y + r * 1.1
+  );
+  // White shine on left bump
+  gfx.fillStyle(0xffffff, alpha * 0.5);
+  gfx.fillCircle(x - r * 0.9 - 2, y - r * 0.55, r * 0.22);
+}
+
+function drawMoose(mx, my, flying) {
+  // Shadow NES (rect plano, sin alpha)
+  gfx.fillStyle(0x222222);
+  gfx.fillRect(mx - 24, my + 22, 48, 5);
+  // Legs
+  gfx.fillStyle(0x552200);
+  if (flying) {
+    // Pose de vuelo: patas extendidas hacia los lados (reno volando)
+    gfx.fillRect(mx - 42, my,      15, 5); // pata trasera-izq horizontal
+    gfx.fillRect(mx - 28, my - 8,  15, 5); // pata trasera-der diagonal arriba
+    gfx.fillRect(mx + 13, my - 8,  15, 5); // pata delantera-izq diagonal arriba
+    gfx.fillRect(mx + 27, my,      15, 5); // pata delantera-der horizontal
+  } else {
+    gfx.fillRect(mx - 20, my + 10, 6, 18);
+    gfx.fillRect(mx - 10, my + 10, 6, 18);
+    gfx.fillRect(mx + 5,  my + 10, 6, 18);
+    gfx.fillRect(mx + 15, my + 10, 6, 18);
+  }
+  // Tail (cream, left side)
+  gfx.fillStyle(0xffdd88);
+  gfx.fillEllipse(mx - 25, my + 2, 10, 8);
+  // Body
+  gfx.fillStyle(0xaa4400);
+  gfx.fillEllipse(mx, my, 58, 32);
+  // Darker back stripe
+  gfx.fillStyle(0x552200);
+  gfx.fillEllipse(mx - 4, my - 6, 36, 12);
+  // Neck
+  gfx.fillStyle(0xaa4400);
+  gfx.fillRect(mx + 17, my - 18, 12, 20);
+  // Head
+  gfx.fillCircle(mx + 27, my - 22, 13);
+  // Snout
+  gfx.fillStyle(0x664400);
+  gfx.fillEllipse(mx + 39, my - 20, 18, 11);
+  // Nostril
+  gfx.fillStyle(0x000000);
+  gfx.fillCircle(mx + 45, my - 19, 2);
+  // Eye
+  gfx.fillStyle(0xffffff);
+  gfx.fillCircle(mx + 22, my - 27, 4);
+  gfx.fillStyle(0x000000);
+  gfx.fillCircle(mx + 23, my - 27, 2);
+  // Antlers
+  gfx.fillStyle(0x774400);
+  gfx.fillRect(mx + 19, my - 34, 3, 12);
+  gfx.fillRect(mx + 25, my - 32, 3, 10);
+  gfx.fillRect(mx + 13, my - 38, 14, 3);
+  gfx.fillRect(mx + 22, my - 36, 12, 3);
+  gfx.fillRect(mx + 13, my - 50, 3, 14);
+  gfx.fillRect(mx + 22, my - 48, 3, 14);
+  gfx.fillRect(mx + 30, my - 46, 3, 12);
+}
+
+function drawSled(sx, sy, celebrating, shake) {
+  const dy = celebrating ? -10 : 0;
+  const dx = shake;
+  // Shadow NES (rect plano)
+  gfx.fillStyle(0x222222);
+  gfx.fillRect(sx - 32 + dx, sy + 20 + dy, 64, 4);
+  // Runners
+  gfx.fillStyle(0x442200);
+  gfx.fillRect(sx - 34 + dx, sy + 16 + dy, 68, 4);
+  gfx.fillRect(sx - 30 + dx, sy + 12 + dy, 4, 8);
+  gfx.fillRect(sx + 26 + dx, sy + 12 + dy, 4, 8);
+  // Sled body (wooden planks)
+  gfx.fillStyle(0xcc8800);
+  gfx.fillRect(sx - 32 + dx, sy - 8 + dy, 64, 24);
+  // Plank grooves
+  gfx.fillStyle(0x885500);
+  gfx.fillRect(sx - 32 + dx, sy     + dy, 64, 2);
+  gfx.fillRect(sx - 32 + dx, sy + 8 + dy, 64, 2);
+  // Front board (upright)
+  gfx.fillStyle(0xaa6600);
+  gfx.fillRect(sx + 22 + dx, sy - 20 + dy, 8, 36);
+  // 3 children
+  const bc = celebrating
+    ? [0xff8855, 0x55ff88, 0x5588ff]
+    : [0xff2200, 0x00aa00, 0x0000ff];
+  const hc = [0xff0000, 0x00cc00, 0x0000cc];
+  const cxs = [sx - 19 + dx, sx + dx, sx + 19 + dx];
+  for (let i = 0; i < 3; i++) {
+    const cx2 = cxs[i];
+    const cb = celebrating ? Math.sin(Date.now() * 0.012 + i * 2.1) * 5 : 0;
+    // Jacket/body
+    gfx.fillStyle(bc[i]);
+    gfx.fillRect(cx2 - 6, sy - 17 + dy + cb, 12, 11);
+    // Head (skin)
+    gfx.fillStyle(0xffddb8);
+    gfx.fillCircle(cx2, sy - 22 + dy + cb, 5);
+    // Hat brim
+    gfx.fillStyle(0xffffff);
+    gfx.fillRect(cx2 - 7, sy - 28 + dy + cb, 14, 3);
+    // Hat top
+    gfx.fillStyle(hc[i]);
+    gfx.fillRect(cx2 - 5, sy - 39 + dy + cb, 10, 13);
+    // Arms out when celebrating
+    if (celebrating) {
+      gfx.fillStyle(bc[i]);
+      gfx.fillRect(cx2 - 14, sy - 15 + dy + cb, 8, 4);
+      gfx.fillRect(cx2 + 6,  sy - 15 + dy + cb, 8, 4);
+    }
+  }
+}
+
+// ─── Zone & separator ───────────────────────────────────────────────────────
+
+function drawZones() {
+  // NES: campo de juego negro
+  gfx.fillStyle(0x000000);
+  gfx.fillRect(0, 0, SEPARATOR, 558);
+  // Franjas de piso por zona (indicador NES sutil)
+  const floors = [0x000033, 0x003300, 0x220011];
+  for (let z = 0; z < 3; z++) {
+    gfx.fillStyle(floors[z]);
+    gfx.fillRect(0, ZY[z] + ZH - 4, SEPARATOR, 4);
+    // Líneas de slot (muy oscuras)
+    gfx.fillStyle(0x111111);
+    for (let s = 1; s < 4; s++) {
+      gfx.fillRect(0, ZY[z] + s * SH, SEPARATOR, 1);
+    }
+  }
+  // Divisores de zona
+  gfx.fillStyle(0x333333);
+  gfx.fillRect(0, ZY[1], SEPARATOR, 1);
+  gfx.fillRect(0, ZY[2], SEPARATOR, 1);
+  // Mood tint — colores sólidos NES, sin alpha
+  if (happy()) {
+    gfx.fillStyle(0x002200);
+    gfx.fillRect(0, ZY[m.zone], SEPARATOR, ZH);
+  } else {
+    gfx.fillStyle(0x220000);
+    gfx.fillRect(0, ZY[m.zone], SEPARATOR, ZH);
+    gfx.fillStyle(0x220000);
+    gfx.fillRect(0, ZY[f.zone], SEPARATOR, ZH);
+  }
+}
+
+function drawSeparator() {
+  // Panel de yetis: fondo azul-negro NES
+  gfx.fillStyle(0x000022);
+  gfx.fillRect(SEPARATOR + 2, 0, 800 - SEPARATOR - 2, 558);
+  // Línea blanca NES (separador nítido)
+  gfx.fillStyle(0xffffff);
+  gfx.fillRect(SEPARATOR, 0, 2, 558);
+}
+
+// ─── Projectiles ────────────────────────────────────────────────────────────
+
+function drawProjectiles() {
+  for (const p of projectiles) {
+    if (p.isWall) { drawWall(p.x, p.y, p.w, p.h); continue; }
+    if (p.isObstacle) {
+      if (p.subtype === 0) drawBush(p.x, p.y, p.w, p.h);
+      else if (p.subtype === 1) drawSnake(p.x, p.y, p.w, p.h);
+      else drawOpossum(p.x, p.y, p.w, p.h);
+    } else {
+      if (p.subtype === 0) drawCoin(p.x, p.y, p.w, p.h);
+      else if (p.subtype === 1) drawCandy(p.x, p.y, p.w, p.h);
+      else drawHeart(p.x, p.y, p.w, p.h);
+    }
+  }
+}
+
+// ── Obstacle: spiny angry bush ──────────────────────────────────────────────
+function drawBush(x, y, w, h) {
+  const cx = x + w / 2, cy = y + h / 2;
+  // Main body NES green
+  gfx.fillStyle(0x008800);
+  gfx.fillEllipse(cx, cy, w * 0.84, h * 0.72);
+  // Darker leaf clusters
+  gfx.fillStyle(0x004400);
+  gfx.fillEllipse(cx - w * 0.15, cy + h * 0.06, w * 0.34, h * 0.3);
+  gfx.fillEllipse(cx + w * 0.18, cy - h * 0.07, w * 0.28, h * 0.26);
+  // Spines NES yellow
+  gfx.fillStyle(0xffcc00);
+  const n = Math.max(7, Math.round(w / 11));
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const bx = cx + Math.cos(a) * w * 0.37;
+    const by = cy + Math.sin(a) * h * 0.31;
+    gfx.fillTriangle(
+      bx + Math.cos(a + 1.4) * 4, by + Math.sin(a + 1.4) * 4,
+      bx - Math.cos(a + 1.4) * 4, by - Math.sin(a + 1.4) * 4,
+      bx + Math.cos(a) * 12, by + Math.sin(a) * 10
+    );
+  }
+  // Angry red eyes
+  gfx.fillStyle(0xff2200);
+  gfx.fillCircle(cx - w * 0.1, cy - h * 0.09, 4);
+  gfx.fillCircle(cx + w * 0.1, cy - h * 0.09, 4);
+  gfx.fillStyle(0x000000);
+  gfx.fillCircle(cx - w * 0.1, cy - h * 0.09, 2);
+  gfx.fillCircle(cx + w * 0.1, cy - h * 0.09, 2);
+}
+
+// ── Obstacle: angry snake (head faces left = direction of travel) ───────────
+function drawSnake(x, y, w, h) {
+  const cy = y + h / 2, r = h * 0.27;
+  const segs = Math.max(4, Math.round(w / (r * 1.6)));
+  // Body segments right-to-left (draw back-to-front)
+  for (let i = segs; i >= 0; i--) {
+    const sx = x + w * (1 - i / segs);
+    const sy = cy + Math.sin(i * 1.0) * h * 0.22;
+    gfx.fillStyle(i % 2 === 0 ? 0x44cc00 : 0x228800);
+    gfx.fillCircle(sx, sy, r);
+  }
+  // Head (left side, facing direction of travel)
+  const hx = x + r * 1.4, hy = cy;
+  gfx.fillStyle(0x55ff22);
+  gfx.fillEllipse(hx, hy, r * 2.8, h * 0.56);
+  // Angry eyes
+  gfx.fillStyle(0xff0000);
+  gfx.fillCircle(hx - r * 0.35, hy - r * 0.3, 4);
+  gfx.fillCircle(hx + r * 0.35, hy - r * 0.3, 4);
+  gfx.fillStyle(0x000000);
+  gfx.fillCircle(hx - r * 0.35, hy - r * 0.3, 2);
+  gfx.fillCircle(hx + r * 0.35, hy - r * 0.3, 2);
+  // Forked tongue extending left
+  gfx.fillStyle(0xff0044);
+  gfx.fillRect(x, hy - 2, r * 1.2, 3);
+  gfx.fillRect(x, hy - 6, r * 0.65, 3);
+  gfx.fillRect(x, hy + 3, r * 0.65, 3);
+}
+
+// ── Obstacle: angry opossum (head faces left) ────────────────────────────────
+function drawOpossum(x, y, w, h) {
+  const cy = y + h / 2;
+  // Coiled tail (right side)
+  gfx.fillStyle(0xffddaa);
+  gfx.fillEllipse(x + w * 0.83, cy + h * 0.14, w * 0.24, h * 0.26);
+  gfx.fillEllipse(x + w * 0.75, cy + h * 0.32, w * 0.18, h * 0.2);
+  // Body
+  gfx.fillStyle(0xaaaaaa);
+  gfx.fillEllipse(x + w * 0.55, cy, w * 0.58, h * 0.62);
+  // Belly
+  gfx.fillStyle(0xeeeeee);
+  gfx.fillEllipse(x + w * 0.5, cy + h * 0.06, w * 0.36, h * 0.38);
+  // Head
+  const hx = x + w * 0.22, hy = cy - h * 0.04;
+  gfx.fillStyle(0xbbbbbb);
+  gfx.fillCircle(hx, hy, h * 0.24);
+  // Ear
+  gfx.fillStyle(0x999999);
+  gfx.fillTriangle(hx - h * 0.04, hy - h * 0.22, hx + h * 0.1, hy - h * 0.22, hx + h * 0.03, hy - h * 0.42);
+  gfx.fillStyle(0xffaaaa);
+  gfx.fillTriangle(hx - h * 0.02, hy - h * 0.22, hx + h * 0.08, hy - h * 0.22, hx + h * 0.03, hy - h * 0.38);
+  // Pointed snout
+  gfx.fillStyle(0xcccccc);
+  gfx.fillTriangle(hx - h * 0.27, hy, hx - h * 0.06, hy - h * 0.09, hx - h * 0.06, hy + h * 0.09);
+  // Angry eye
+  gfx.fillStyle(0xff0000);
+  gfx.fillCircle(hx + h * 0.04, hy - h * 0.06, 4);
+  gfx.fillStyle(0x000000);
+  gfx.fillCircle(hx + h * 0.04, hy - h * 0.06, 2);
+  // Legs
+  gfx.fillStyle(0x999999);
+  gfx.fillRect(x + w * 0.38, cy + h * 0.28, 7, 11);
+  gfx.fillRect(x + w * 0.54, cy + h * 0.28, 7, 11);
+}
+
+// ── Wall: ice barrier with spikes ────────────────────────────────────────────
+function drawWall(x, y, w, h) {
+  const n = Math.ceil(h / SH);
+  for (let i = 0; i < n; i++) {
+    const by = y + i * SH;
+    const bh = Math.min(SH, y + h - by);
+    gfx.fillStyle(i % 2 === 0 ? 0x0000aa : 0x0044cc);
+    gfx.fillRect(x, by, w, bh - 1);
+    gfx.fillStyle(0x3366ee);
+    gfx.fillRect(x + 2, by + 2, w - 4, 7);
+    gfx.fillStyle(0x000066);
+    gfx.fillRect(x, by + bh - 1, w, 1);
+  }
+  // Right edge highlight
+  gfx.fillStyle(0x88ccff);
+  gfx.fillRect(x + w - 3, y, 3, h);
+  // Left-facing ice spikes NES
+  gfx.fillStyle(0xaaddff);
+  const ns = Math.ceil(h / 20);
+  for (let i = 0; i < ns; i++) {
+    const sy = y + (i + 0.5) * (h / ns);
+    gfx.fillTriangle(x, sy - 9, x, sy + 9, x - 17, sy);
+    gfx.fillStyle(0xffffff);
+    gfx.fillTriangle(x, sy - 9, x - 5, sy - 5, x - 17, sy);
+    gfx.fillStyle(0xaaddff);
+  }
+}
+
+// ── Goodie: gold coin ────────────────────────────────────────────────────────
+function drawCoin(x, y, w, h) {
+  const cx = x + w / 2, cy = y + h / 2;
+  const r = Math.min(w, h) * 0.42;
+  // Moneda NES: amarillo plano, sin shine
+  gfx.fillStyle(0xcc8800);
+  gfx.fillCircle(cx, cy, r);
+  gfx.fillStyle(0xffcc00);
+  gfx.fillCircle(cx, cy, r * 0.80);
+  // Cross symbol
+  gfx.fillStyle(0xaa6600);
+  gfx.fillRect(cx - 2, cy - r * 0.48, 4, r * 0.96);
+  gfx.fillRect(cx - r * 0.48, cy - 2, r * 0.96, 4);
+}
+
+// ── Goodie: lollipop candy ───────────────────────────────────────────────────
+function drawCandy(x, y, w, h) {
+  const cx = x + w / 2;
+  const r = Math.min(w, h) * 0.36;
+  const ccy = y + r + 6;
+  // Stick
+  gfx.fillStyle(0xccccaa);
+  gfx.fillRect(cx - 2, ccy + r, 4, h - r - (ccy - y) - 4);
+  // Candy circle NES pink
+  gfx.fillStyle(0xff2266);
+  gfx.fillCircle(cx, ccy, r);
+  // White swirl
+  gfx.fillStyle(0xffffff);
+  for (let i = 0; i < 3; i++) {
+    const a = i * Math.PI * 2 / 3;
+    gfx.fillTriangle(
+      cx, ccy,
+      cx + Math.cos(a) * r, ccy + Math.sin(a) * r,
+      cx + Math.cos(a + 0.75) * r, ccy + Math.sin(a + 0.75) * r
+    );
+  }
+  gfx.fillStyle(0xff2266);
+  gfx.fillCircle(cx, ccy, r * 0.3);
+}
+
+// ── Goodie: heart ────────────────────────────────────────────────────────────
+function drawHeart(x, y, w, h) {
+  const cx = x + w / 2, cy = y + h / 2;
+  const r = Math.min(w, h) * 0.27;
+  // Corazón NES rojo puro, sin shine
+  gfx.fillStyle(0xff0000);
+  gfx.fillCircle(cx - r, cy - r * 0.2, r);
+  gfx.fillCircle(cx + r, cy - r * 0.2, r);
+  gfx.fillTriangle(cx - r * 1.92, cy - r * 0.18, cx + r * 1.92, cy - r * 0.18, cx, cy + r * 1.8);
+}
+
+// ─── Characters ─────────────────────────────────────────────────────────────
+
+// Front-facing DK-style gorilla.
+// When angry, left arm punches toward the LEFT (into the play zone).
+function drawChar(ch, cx, isFemale, forceHappy) {
+  const y = ch.cy + ch.bounce;
+  const h = forceHappy !== undefined ? forceHappy : happy();
+  const B = 0xdddddd, S = 0xffffff, D = 0x888888; // yeti NES white
+
+  // Shadow (flat dark rect, NES style)
+  gfx.fillStyle(0x222222);
+  gfx.fillRect(cx - 28, y + 54, 56, 6);
+
+  // Legs
+  gfx.fillStyle(D);
+  gfx.fillRect(cx - 18, y + 28, 14, 28);
+  gfx.fillRect(cx + 4,  y + 28, 14, 28);
+  gfx.fillEllipse(cx - 12, y + 58, 24, 10);
+  gfx.fillEllipse(cx + 12, y + 58, 24, 10);
+
+  // Body
+  gfx.fillStyle(B);
+  gfx.fillRect(cx - 28, y - 22, 56, 52);
+  gfx.fillStyle(S);
+  gfx.fillEllipse(cx, y + 5, 36, 42);
+
+  // Scarf / tie
+  gfx.fillStyle(h ? 0x0066ff : 0x003399);
+  gfx.fillTriangle(cx - 5, y - 7, cx + 5, y - 7, cx, y + 17);
+
+  // Arms
+  gfx.fillStyle(B);
+  if (h) {
+    // Arms up: celebrate!
+    gfx.fillRect(cx - 46, y - 40, 18, 28);
+    gfx.fillRect(cx + 28, y - 40, 18, 28);
+    gfx.fillStyle(S);
+    gfx.fillCircle(cx - 38, y - 44, 10);
+    gfx.fillCircle(cx + 38, y - 44, 10);
+  } else {
+    // Both arms slam DOWN toward the ground
+    const ext = Math.min(ch.punch, 22);
+    // Left arm
+    gfx.fillRect(cx - 48, y - 6, 20, 20 + ext);
+    gfx.fillStyle(S);
+    gfx.fillCircle(cx - 38, y + 17 + ext, 12); // left fist
+    gfx.fillStyle(B);
+    // Right arm
+    gfx.fillRect(cx + 28, y - 6, 20, 20 + ext);
+    gfx.fillStyle(S);
+    gfx.fillCircle(cx + 38, y + 17 + ext, 12); // right fist
+    gfx.fillStyle(B);
+  }
+
+  // Head
+  gfx.fillStyle(B);
+  gfx.fillCircle(cx, y - 36, 28);
+  // Muzzle
+  gfx.fillStyle(S);
+  gfx.fillEllipse(cx, y - 25, 32, 22);
+  // Nostrils
+  gfx.fillStyle(D);
+  gfx.fillCircle(cx - 6, y - 23, 2);
+  gfx.fillCircle(cx + 6, y - 23, 2);
+
+  // Eyes — blue when happy, red when angry (yeti trait)
+  gfx.fillStyle(0xffffff);
+  gfx.fillCircle(cx - 11, y - 44, 7);
+  gfx.fillCircle(cx + 11, y - 44, 7);
+  gfx.fillStyle(h ? 0x0000ff : 0xff0000);
+  gfx.fillCircle(cx - 11, h ? y - 43 : y - 46, 5);
+  gfx.fillCircle(cx + 11, h ? y - 43 : y - 46, 5);
+  gfx.fillStyle(0x000000);
+  gfx.fillCircle(cx - 11, h ? y - 43 : y - 46, 2);
+  gfx.fillCircle(cx + 11, h ? y - 43 : y - 46, 2);
+
+  // Eyebrows
+  gfx.fillStyle(D);
+  if (h) {
+    gfx.fillRect(cx - 17, y - 53, 12, 2);
+    gfx.fillRect(cx +  5, y - 53, 12, 2);
+  } else {
+    gfx.fillRect(cx - 17, y - 55, 12, 3); // furrowed inward
+    gfx.fillRect(cx +  5, y - 53, 12, 3);
+  }
+
+  // Mouth (5-pixel arc: smile or frown)
+  gfx.fillStyle(D);
+  for (let i = 0; i < 5; i++) {
+    const arc = i < 2.5 ? i : 4 - i; // 0,1,2,1,0
+    const my = h ? y - 16 + arc : y - 14 - arc;
+    gfx.fillRect(cx - 8 + i * 4, my, 3, 3);
+  }
+
+  // Female yeti: corona de cristal NES cyan
+  if (isFemale) {
+    gfx.fillStyle(0x44ffff);
+    gfx.fillTriangle(cx - 4, y - 65, cx, y - 86, cx + 4, y - 65);
+    gfx.fillTriangle(cx - 14, y - 65, cx - 10, y - 80, cx - 5, y - 65);
+    gfx.fillTriangle(cx + 5, y - 65, cx + 10, y - 80, cx + 14, y - 65);
+    gfx.fillStyle(0xffffff);
+    gfx.fillCircle(cx, y - 86, 3);
+    gfx.fillCircle(cx - 10, y - 80, 2);
+    gfx.fillCircle(cx + 10, y - 80, 2);
+  }
+}
+
+// ─── Title screen ─────────────────────────────────────────────────────────────
+
+function showTitleScreen() {
+  clearUI();
+  const mk = (x, y, t, sz, col) => {
+    const o = scene.add.text(x, y, t, {
+      fontSize: sz + 'px', color: col, fontFamily: 'monospace',
+      stroke: '#000000', strokeThickness: 3
+    }).setOrigin(0.5);
+    uiObjects.push(o); return o;
+  };
+  mk(400, 82, 'Yeti-Aventuras', 54, '#ffff00');
+  mk(400, 388, 'Presiona un bot\u00f3n para iniciar', 18, '#ffffff');
+}
+
+function drawTitleBg(delta) {
+  titleSledX += delta * 0.18;
+  if (titleSledX > 920) titleSledX = -180;
+  const t = Date.now();
+  // NES: fondo negro
+  gfx.fillStyle(0x000000);
+  gfx.fillRect(0, 0, 800, 600);
+  // Estrellas fijas NES (sin parpadeo alpha — patrón determinista)
+  for (let i = 0; i < 50; i++) {
+    const sx = (i * 97 + 43) % 800, sy = (i * 53 + 17) % 420;
+    gfx.fillStyle(i % 3 === 0 ? 0xffffff : (i % 3 === 1 ? 0xaaaaff : 0xffff88));
+    gfx.fillRect(sx, sy, i % 5 === 0 ? 2 : 1, i % 5 === 0 ? 2 : 1);
+  }
+  // Nieve: blanco plano NES
+  gfx.fillStyle(0xffffff); gfx.fillRect(0, 478, 800, 122);
+  gfx.fillStyle(0xaaccff); gfx.fillRect(0, 478, 800, 3);
+  // Yetis beside the title (happy, bouncing)
+  const lb = Math.sin(t * 0.0035) * 8;
+  const rb = Math.sin(t * 0.0035 + 1.6) * 8;
+  drawChar({ cy: 185 + lb, punch: 0, bounce: 0 }, 82, false, true);
+  drawChar({ cy: 185 + rb, punch: 0, bounce: 0 }, 718, true, true);
+  // Cycling moose + sled on snow
+  const cY = 447;
+  drawSled(titleSledX, cY, true, 0);
+  drawMoose(titleSledX + 92, cY);
+}
+
+// ─── Scores screen background ────────────────────────────────────────────────
+
+function drawScoresBg() {
+  const t = Date.now();
+  // Black background
+  gfx.fillStyle(0x000000, 1);
+  gfx.fillRect(0, 0, 800, 600);
+  // Estrellas fijas NES
+  for (let i = 0; i < 30; i++) {
+    const sx = (i * 97 + 43) % 800;
+    const sy = (i * 53 + 17) % 480;
+    gfx.fillStyle(i % 2 === 0 ? 0xffffff : 0xaaaaff);
+    gfx.fillRect(sx, sy, 2, 2);
+  }
+  // Happy female gorilla — left side, bouncing arms
+  const hBounce = Math.sin(t * 0.004) * 7;
+  drawChar({ cy: 235 + hBounce, punch: 0, bounce: 0 }, 65, true, true);
+  // Angry male gorilla — right side, punching toward center
+  const aPunch = Math.abs(Math.sin(t * 0.003)) * 24;
+  drawChar({ cy: 235, punch: aPunch, bounce: 0 }, 735, false, false);
+  // Moose + sled celebrating — bottom center
+  const cSledX = 340, cMooseX = 430, cY = 543;
+  // Rope (simple slack bezier)
+  gfx.lineStyle(2, 0xaa6600, 1);
+  gfx.beginPath(); gfx.moveTo(cSledX + 33, cY);
+  const cpx = (cSledX + 33 + cMooseX - 28) / 2;
+  for (let i = 1; i <= 8; i++) {
+    const fv = i / 8;
+    gfx.lineTo((1-fv)*(1-fv)*(cSledX+33) + 2*(1-fv)*fv*cpx + fv*fv*(cMooseX-28),
+               (1-fv)*(1-fv)*cY + 2*(1-fv)*fv*(cY+14) + fv*fv*cY);
+  }
+  gfx.strokePath();
+  drawSled(cSledX, cY, true, 0);
+  drawMoose(cMooseX, cY);
+}
+
+// ─── Rhythm bar ─────────────────────────────────────────────────────────────
+
+function drawRhythmBar() {
+  const BY = 558, BH = 40, CW = 200;
+  for (let i = 0; i < 4; i++) {
+    const active = i === rStep;
+    gfx.fillStyle(active ? 0x111100 : 0x000000);
+    gfx.fillRect(i * CW, BY, CW, BH);
+    gfx.lineStyle(1, active ? 0xffff00 : 0x444444, 1);
+    gfx.strokeRect(i * CW, BY, CW, BH);
+    const nc = active ? 0xffff00 : 0x444444;
+    const nx = i * CW + CW / 2, ny = BY + 16;
+    gfx.fillStyle(nc);
+    gfx.fillEllipse(nx, ny + 6, 12, 9);
+    gfx.fillRect(nx + 5, ny - 10, 2, 17);
+    gfx.fillRect(nx + 5, ny - 10, 7, 2);
+  }
+}
+
+// ─── Audio ──────────────────────────────────────────────────────────────────
+
+function playTone(freq, vol, type) {
   try {
     const ctx = scene.sound.context;
     const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
+    const g = ctx.createGain();
+    osc.connect(g); g.connect(ctx.destination);
     osc.frequency.value = freq;
-    osc.type = 'square';
-    gain.gain.setValueAtTime(0.08, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + dur);
+    osc.type = type || 'square';
+    g.gain.setValueAtTime(vol, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
     osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + dur);
+    osc.stop(ctx.currentTime + 0.22);
   } catch(e) {}
 }
 
-function playPaddleHit(scene) {
+function playJingle() {
   try {
     const ctx = scene.sound.context;
-    // Main hit
-    const osc1 = ctx.createOscillator();
-    const gain1 = ctx.createGain();
-    osc1.connect(gain1);
-    gain1.connect(ctx.destination);
-    osc1.frequency.value = 800;
-    osc1.type = 'square';
-    gain1.gain.setValueAtTime(0.2, ctx.currentTime);
-    gain1.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-    osc1.start(ctx.currentTime);
-    osc1.stop(ctx.currentTime + 0.1);
-    
-    // Harmonic
-    const osc2 = ctx.createOscillator();
-    const gain2 = ctx.createGain();
-    osc2.connect(gain2);
-    gain2.connect(ctx.destination);
-    osc2.frequency.value = 1200;
-    osc2.type = 'sine';
-    gain2.gain.setValueAtTime(0.1, ctx.currentTime);
-    gain2.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
-    osc2.start(ctx.currentTime);
-    osc2.stop(ctx.currentTime + 0.08);
-  } catch(e) {}
-}
-
-function playWallHit(scene) {
-  try {
-    const ctx = scene.sound.context;
-    // Bounce sound
-    const osc1 = ctx.createOscillator();
-    const gain1 = ctx.createGain();
-    osc1.connect(gain1);
-    gain1.connect(ctx.destination);
-    osc1.frequency.value = 400;
-    osc1.type = 'triangle';
-    gain1.gain.setValueAtTime(0.12, ctx.currentTime);
-    gain1.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.07);
-    osc1.start(ctx.currentTime);
-    osc1.stop(ctx.currentTime + 0.07);
-    
-    // Lower thump
-    const osc2 = ctx.createOscillator();
-    const gain2 = ctx.createGain();
-    osc2.connect(gain2);
-    gain2.connect(ctx.destination);
-    osc2.frequency.value = 150;
-    osc2.type = 'sine';
-    gain2.gain.setValueAtTime(0.15, ctx.currentTime);
-    gain2.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05);
-    osc2.start(ctx.currentTime);
-    osc2.stop(ctx.currentTime + 0.05);
-  } catch(e) {}
-}
-
-function playScoreSound(scene) {
-  try {
-    const ctx = scene.sound.context;
-    // Epic descending tone for score
-    [600, 450, 300, 200].forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.value = freq;
-      osc.type = 'sawtooth';
+    [523, 659, 784, 1047].forEach((freq, i) => {
       const t = ctx.currentTime + i * 0.1;
-      gain.gain.setValueAtTime(0.15, t);
-      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
-      osc.start(t);
-      osc.stop(t + 0.2);
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.connect(g); g.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      g.gain.setValueAtTime(0.1, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      osc.start(t); osc.stop(t + 0.18);
     });
   } catch(e) {}
 }
 
-function createParticles(x, y, color) {
-  for (let i = 0; i < 8; i++) {
-    const angle = (Math.PI * 2 * i) / 8;
-    particles.push({
-      x, y,
-      vx: Math.cos(angle) * 3,
-      vy: Math.sin(angle) * 3,
-      color,
-      size: 2 + Math.random() * 2,
-      life: 15 + Math.random() * 10
-    });
+// ─── Floating life-change texts ───────────────────────────────────────────────
+
+function spawnFloatText(x, y, txt, col) {
+  const t = scene.add.text(x, y, txt, {
+    fontSize: '18px', color: col, fontFamily: 'monospace',
+    stroke: '#000000', strokeThickness: 2
+  }).setOrigin(0.5);
+  floatTexts.push({ obj: t, y: y, a: 1 });
+}
+
+function updateFloatTexts(delta) {
+  for (let i = floatTexts.length - 1; i >= 0; i--) {
+    const ft = floatTexts[i];
+    ft.y -= 1;
+    ft.a -= 0.016;
+    ft.obj.y = ft.y;
+    ft.obj.setAlpha(Math.max(0, ft.a));
+    if (ft.a <= 0) { ft.obj.destroy(); floatTexts.splice(i, 1); }
   }
+}
+
+// ─── Leaderboard & Game Over ──────────────────────────────────────────────────
+
+function loadScores() {
+  try { return JSON.parse(localStorage.getItem('rgScores') || '[]'); } catch(e) { return []; }
+}
+
+function saveScores(arr) {
+  try { localStorage.setItem('rgScores', JSON.stringify(arr)); } catch(e) {}
+}
+
+function enterGameOver() {
+  gameOver = true;
+  const scores = loadScores();
+  let rank = scores.findIndex(s => score > s.score);
+  if (rank === -1) rank = scores.length;
+  playerRank = rank < 10 ? rank : -1;
+  if (playerRank >= 0) {
+    gameState = 'naming';
+    initials = ['A', 'A', 'A'];
+    initPos = 0;
+    namingCool = 800;
+    showNamingScreen();
+  } else {
+    gameState = 'scores';
+    namingCool = 1500;
+    showScoresScreen(scores);
+  }
+}
+
+function clearUI() {
+  for (const o of uiObjects) { if (o && o.destroy) o.destroy(); }
+  uiObjects = []; letterTexts = [];
+}
+
+// ─── Initial-entry screen ─────────────────────────────────────────────────────
+
+function showNamingScreen() {
+  clearUI();
+  const mk = (x, y, t, sz, col) => {
+    const o = scene.add.text(x, y, t, {
+      fontSize: sz + 'px', color: col, fontFamily: 'monospace',
+      stroke: '#000000', strokeThickness: 3
+    }).setOrigin(0.5);
+    uiObjects.push(o);
+    return o;
+  };
+  mk(300, 185, 'GAME OVER', 46, '#ff0000');
+  mk(300, 243, 'SCORE: ' + score, 24, '#ffff44');
+  mk(300, 283, 'TOP 10 - INGRESA TUS INICIALES:', 14, '#00ff00');
+  letterTexts = [];
+  for (let i = 0; i < 3; i++) {
+    const o = scene.add.text(252 + i * 54, 326, initials[i], {
+      fontSize: '44px', color: '#ffffff', fontFamily: 'monospace',
+      stroke: '#000000', strokeThickness: 3
+    }).setOrigin(0.5);
+    uiObjects.push(o);
+    letterTexts.push(o);
+  }
+  mk(300, 390, '\u2191\u2193 Cambiar letra   \u2190\u2192 Mover cursor', 13, '#888888');
+  mk(300, 410, 'Enter / 1 = Confirmar', 13, '#888888');
+}
+
+function updateNaming(delta) {
+  namingCool -= delta;
+  if (namingCool > 0) {
+    // Highlight active letter even while cooling down
+    for (let i = 0; i < 3; i++) {
+      letterTexts[i].setColor(i === initPos ? '#ffff00' : '#ffffff');
+    }
+    return;
+  }
+  if (keys['P2L'] || keys['P1L']) {
+    initPos = Math.max(0, initPos - 1); namingCool = 150;
+  } else if (keys['P2R'] || keys['P1R']) {
+    initPos = Math.min(2, initPos + 1); namingCool = 150;
+  } else if (keys['P2U'] || keys['P1U']) {
+    initials[initPos] = String.fromCharCode((initials[initPos].charCodeAt(0) - 65 + 1) % 26 + 65);
+    namingCool = 120;
+  } else if (keys['P2D'] || keys['P1D']) {
+    initials[initPos] = String.fromCharCode((initials[initPos].charCodeAt(0) - 65 + 25) % 26 + 65);
+    namingCool = 120;
+  } else if (keys['START1']) {
+    submitInitials(); return;
+  }
+  for (let i = 0; i < 3; i++) {
+    letterTexts[i].setText(initials[i]);
+    letterTexts[i].setColor(i === initPos ? '#ffff00' : '#ffffff');
+  }
+}
+
+function submitInitials() {
+  const name = initials.join('');
+  const scores = loadScores();
+  scores.push({ name, score });
+  scores.sort((a, b) => b.score - a.score);
+  if (scores.length > 10) scores.length = 10;
+  saveScores(scores);
+  playerRank = scores.findIndex(s => s.name === name && s.score === score);
+  namingCool = 1500;
+  showScoresScreen(scores);
+}
+
+// ─── Scores screen ────────────────────────────────────────────────────────────
+
+function showScoresScreen(scores) {
+  gameState = 'scores';
+  clearUI();
+  const mk = (x, y, t, sz, col) => {
+    const o = scene.add.text(x, y, t, {
+      fontSize: sz + 'px', color: col, fontFamily: 'monospace',
+      stroke: '#000000', strokeThickness: 2
+    }).setOrigin(0.5);
+    uiObjects.push(o);
+    return o;
+  };
+  mk(400, 20, 'TOP 10 SCORES', 26, '#ffff00');
+  mk(400, 52, 'SCORE FINAL: ' + score, 16, '#aaaaaa');
+  const list = scores.slice(0, 10);
+  for (let i = 0; i < list.length; i++) {
+    const s = list[i];
+    const hi = i === playerRank;
+    mk(400, 80 + i * 38, (i + 1) + '.  ' + s.name + '   ' + s.score, 18,
+      hi ? '#ffff44' : '#cccccc');
+  }
+  if (list.length === 0) mk(400, 200, '(sin registros aun)', 16, '#666666');
+  mk(400, 458, '[ Enter / 1 ]   REINICIAR', 17, '#00ff00');
+}
+
+function updateScoresInput(delta) {
+  namingCool -= delta;
+  if (namingCool > 0) return;
+  if (keys['START1'] || keys['START2']) doRestart();
+}
+
+function doRestart() {
+  skipTitle = true;
+  floatTexts = []; uiObjects = []; letterTexts = [];
+  scene.scene.restart();
 }
