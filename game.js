@@ -62,6 +62,13 @@ let celebTimer = 0, damageTimer = 0, dmgShake = 0;
 let gameOver = false;
 let lifeText, scoreText;
 let heartParticles = [], heartCooldown = 0;
+let floatTexts = [];
+let gameState = 'playing'; // 'playing' | 'naming' | 'scores'
+let initials = ['A', 'A', 'A'];
+let initPos = 0, namingCool = 0;
+let uiObjects = [], letterTexts = [];
+let playerRank = -1;
+let dmgAccum = 0;
 
 function laneCY(lane) {
   return ZY[Math.floor(lane / 4)] + (lane % 4) * SH + SH / 2;
@@ -69,21 +76,38 @@ function laneCY(lane) {
 
 function create() {
   scene = this;
+  // Reset all mutable state so scene.scene.restart() gives a clean slate
+  keys = {};
+  rStep = 0; rAccum = 0;
+  lastObstSlot = [-1, -1, -1];
+  m = { zone: 0, cy: zCY(0), targetCY: zCY(0), punch: 0, bounce: 0 };
+  f = { zone: 2, cy: zCY(2), targetCY: zCY(2), punch: 0, bounce: 0 };
+  projectiles = [];
+  mooseX = 132; sledX = 50; mooseLane = 5; mooseMCool = 0; mooseHCool = 0;
+  mooseCY = laneCY(5); sledCY = mooseCY;
+  life = 3; score = 0;
+  celebTimer = 0; damageTimer = 0; dmgShake = 0;
+  gameOver = false; gameState = 'playing';
+  heartParticles = []; heartCooldown = 0;
+  floatTexts = []; uiObjects = []; letterTexts = [];
+  initials = ['A', 'A', 'A']; initPos = 0; namingCool = 0;
+  playerRank = -1; dmgAccum = 0;
   gfx = this.add.graphics();
   this.input.keyboard.on('keydown', e => { keys[KEYBOARD_TO_ARCADE[e.key] || e.key] = true; });
   this.input.keyboard.on('keyup',   e => { keys[KEYBOARD_TO_ARCADE[e.key] || e.key] = false; });
-  mooseCY = laneCY(mooseLane);
-  sledCY  = mooseCY;   // start co-located with moose
   lifeText  = this.add.text(8,   4, 'LIFE: 3',  { fontSize: '15px', color: '#ff4444', fontFamily: 'monospace' });
   scoreText = this.add.text(280, 4, 'SCORE: 0', { fontSize: '15px', color: '#ffff44', fontFamily: 'monospace' });
 }
 
 function update(time, delta) {
-  if (gameOver) {
+  updateFloatTexts(delta);
+  if (gameState !== 'playing') {
     gfx.clear();
     drawZones();
     drawSeparator();
     drawRhythmBar();
+    if (gameState === 'naming') updateNaming(delta);
+    else if (gameState === 'scores') updateScoresInput(delta);
     return;
   }
 
@@ -254,30 +278,27 @@ function checkCollisions(delta) {
     const p = projectiles[i];
     if (p.x + p.w < sx || p.x > sx + sw || p.y + p.h < sy || p.y > sy + sh) continue;
     if (p.isObstacle) {
-      life -= DMG_RATE * delta / 1000;
+      const dmg = DMG_RATE * delta / 1000;
+      life -= dmg;
+      dmgAccum += dmg;
       if (life <= 0) {
         life = 0;
-        if (!gameOver) {
-          gameOver = true;
-          scene.add.text(400, 252, 'GAME OVER', {
-            fontSize: '52px', color: '#ff2200', fontFamily: 'monospace',
-            stroke: '#000000', strokeThickness: 5
-          }).setOrigin(0.5);
-          scene.add.text(400, 316, 'SCORE: ' + score, {
-            fontSize: '30px', color: '#ffff44', fontFamily: 'monospace',
-            stroke: '#000000', strokeThickness: 3
-          }).setOrigin(0.5);
-        }
+        if (!gameOver) enterGameOver();
       }
       damageTimer = 200;
-      // Spawn breaking hearts periodically while taking damage
       if (heartCooldown <= 0) {
         heartCooldown = 550;
         spawnHeartBreak(sledX, sledCY);
+        spawnFloatText(sledX + (Math.random() - 0.5) * 30, sledCY - 45,
+          '-' + dmgAccum.toFixed(1) + '\u2665', '#ff4444');
+        dmgAccum = 0;
       }
     } else {
-      if (p.subtype === 2) { life = Math.min(5, life + 1); }
-      else { score += 10; }
+      let txt;
+      if (p.subtype === 2) { life = Math.min(5, life + 1); txt = '+1\u2665'; }
+      else { score += 10; txt = '+10'; }
+      spawnFloatText(p.x + p.w / 2, p.y + p.h / 2, txt,
+        p.subtype === 2 ? '#ff88aa' : '#ffff44');
       celebTimer = 300;
       playTone(880, 0.1, 'sine');
       projectiles.splice(i, 1);
@@ -802,4 +823,165 @@ function playTone(freq, vol, type) {
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.22);
   } catch(e) {}
+}
+
+// ─── Floating life-change texts ───────────────────────────────────────────────
+
+function spawnFloatText(x, y, txt, col) {
+  const t = scene.add.text(x, y, txt, {
+    fontSize: '18px', color: col, fontFamily: 'monospace',
+    stroke: '#000000', strokeThickness: 2
+  }).setOrigin(0.5);
+  floatTexts.push({ obj: t, y: y, a: 1 });
+}
+
+function updateFloatTexts(delta) {
+  for (let i = floatTexts.length - 1; i >= 0; i--) {
+    const ft = floatTexts[i];
+    ft.y -= 1;
+    ft.a -= 0.016;
+    ft.obj.y = ft.y;
+    ft.obj.setAlpha(Math.max(0, ft.a));
+    if (ft.a <= 0) { ft.obj.destroy(); floatTexts.splice(i, 1); }
+  }
+}
+
+// ─── Leaderboard & Game Over ──────────────────────────────────────────────────
+
+function loadScores() {
+  try { return JSON.parse(localStorage.getItem('rgScores') || '[]'); } catch(e) { return []; }
+}
+
+function saveScores(arr) {
+  try { localStorage.setItem('rgScores', JSON.stringify(arr)); } catch(e) {}
+}
+
+function enterGameOver() {
+  gameOver = true;
+  const scores = loadScores();
+  let rank = scores.findIndex(s => score > s.score);
+  if (rank === -1) rank = scores.length;
+  playerRank = rank < 10 ? rank : -1;
+  if (playerRank >= 0) {
+    gameState = 'naming';
+    initials = ['A', 'A', 'A'];
+    initPos = 0;
+    namingCool = 800;
+    showNamingScreen();
+  } else {
+    gameState = 'scores';
+    namingCool = 1500;
+    showScoresScreen(scores);
+  }
+}
+
+function clearUI() {
+  for (const o of uiObjects) { if (o && o.destroy) o.destroy(); }
+  uiObjects = []; letterTexts = [];
+}
+
+// ─── Initial-entry screen ─────────────────────────────────────────────────────
+
+function showNamingScreen() {
+  clearUI();
+  const mk = (x, y, t, sz, col) => {
+    const o = scene.add.text(x, y, t, {
+      fontSize: sz + 'px', color: col, fontFamily: 'monospace',
+      stroke: '#000000', strokeThickness: 3
+    }).setOrigin(0.5);
+    uiObjects.push(o);
+    return o;
+  };
+  mk(300, 185, 'GAME OVER', 46, '#ff2200');
+  mk(300, 243, 'SCORE: ' + score, 24, '#ffff44');
+  mk(300, 283, 'TOP 10 - INGRESA TUS INICIALES:', 14, '#aaffaa');
+  letterTexts = [];
+  for (let i = 0; i < 3; i++) {
+    const o = scene.add.text(252 + i * 54, 326, initials[i], {
+      fontSize: '44px', color: '#ffffff', fontFamily: 'monospace',
+      stroke: '#000000', strokeThickness: 3
+    }).setOrigin(0.5);
+    uiObjects.push(o);
+    letterTexts.push(o);
+  }
+  mk(300, 390, '\u2191\u2193 Cambiar letra   \u2190\u2192 Mover cursor', 13, '#888888');
+  mk(300, 410, 'Enter / 1 = Confirmar', 13, '#888888');
+}
+
+function updateNaming(delta) {
+  namingCool -= delta;
+  if (namingCool > 0) {
+    // Highlight active letter even while cooling down
+    for (let i = 0; i < 3; i++) {
+      letterTexts[i].setColor(i === initPos ? '#ffff00' : '#ffffff');
+    }
+    return;
+  }
+  if (keys['P2L'] || keys['P1L']) {
+    initPos = Math.max(0, initPos - 1); namingCool = 150;
+  } else if (keys['P2R'] || keys['P1R']) {
+    initPos = Math.min(2, initPos + 1); namingCool = 150;
+  } else if (keys['P2U'] || keys['P1U']) {
+    initials[initPos] = String.fromCharCode((initials[initPos].charCodeAt(0) - 65 + 1) % 26 + 65);
+    namingCool = 120;
+  } else if (keys['P2D'] || keys['P1D']) {
+    initials[initPos] = String.fromCharCode((initials[initPos].charCodeAt(0) - 65 + 25) % 26 + 65);
+    namingCool = 120;
+  } else if (keys['START1']) {
+    submitInitials(); return;
+  }
+  for (let i = 0; i < 3; i++) {
+    letterTexts[i].setText(initials[i]);
+    letterTexts[i].setColor(i === initPos ? '#ffff00' : '#ffffff');
+  }
+}
+
+function submitInitials() {
+  const name = initials.join('');
+  const scores = loadScores();
+  scores.push({ name, score });
+  scores.sort((a, b) => b.score - a.score);
+  if (scores.length > 10) scores.length = 10;
+  saveScores(scores);
+  playerRank = scores.findIndex(s => s.name === name && s.score === score);
+  namingCool = 1500;
+  showScoresScreen(scores);
+}
+
+// ─── Scores screen ────────────────────────────────────────────────────────────
+
+function showScoresScreen(scores) {
+  gameState = 'scores';
+  clearUI();
+  const mk = (x, y, t, sz, col) => {
+    const o = scene.add.text(x, y, t, {
+      fontSize: sz + 'px', color: col, fontFamily: 'monospace',
+      stroke: '#000000', strokeThickness: 2
+    }).setOrigin(0.5);
+    uiObjects.push(o);
+    return o;
+  };
+  mk(300, 22, 'TOP 10 SCORES', 24, '#ffdd00');
+  mk(300, 52, 'SCORE FINAL: ' + score, 16, '#aaaaaa');
+  const list = scores.slice(0, 10);
+  for (let i = 0; i < list.length; i++) {
+    const s = list[i];
+    const hi = i === playerRank;
+    const rank = (i + 1) + '.';
+    mk(300, 84 + i * 44, rank + '  ' + s.name + '   ' + s.score, 18,
+      hi ? '#ffff44' : '#cccccc');
+  }
+  if (list.length === 0) mk(300, 120, '(sin registros aun)', 16, '#666666');
+  mk(300, 546, '[ Enter / 1 ]   REINICIAR', 17, '#55ff55');
+}
+
+function updateScoresInput(delta) {
+  namingCool -= delta;
+  if (namingCool > 0) return;
+  if (keys['START1'] || keys['START2']) doRestart();
+}
+
+function doRestart() {
+  floatTexts = []; uiObjects = []; letterTexts = [];
+  scene.scene.restart();
 }
