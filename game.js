@@ -411,7 +411,7 @@ function drawRope() {
     const sag = (1 - t) * 20;
     const cpx = (x1 + x2) * 0.5;
     const cpy = (y1 + y2) * 0.5 + sag;
-    gfx.lineStyle(2, 0x885522, 1);
+    gfx.lineStyle(2, 0xaa6600, 1);
     gfx.beginPath();
     gfx.moveTo(x1, y1);
     for (let i = 1; i <= 8; i++) {
@@ -443,7 +443,7 @@ function spawnHeartBreak(sx, sy) {
 
 function drawBrokenHeart(x, y, r, alpha) {
   // Left half: one bump + left half of triangle
-  gfx.fillStyle(0xff2255, alpha);
+  gfx.fillStyle(0xff0000, alpha);
   gfx.fillCircle(x - r * 0.7 - 2, y - r * 0.3, r * 0.6);
   gfx.fillTriangle(
     x - r * 1.3 - 2, y - r * 0.2,
@@ -463,11 +463,11 @@ function drawBrokenHeart(x, y, r, alpha) {
 }
 
 function drawMoose(mx, my, flying) {
-  // Shadow
-  gfx.fillStyle(0x000000, 0.22);
-  gfx.fillEllipse(mx, my + 24, 55, 10);
+  // Shadow NES (rect plano, sin alpha)
+  gfx.fillStyle(0x222222);
+  gfx.fillRect(mx - 24, my + 22, 48, 5);
   // Legs
-  gfx.fillStyle(0x3c1e00);
+  gfx.fillStyle(0x552200);
   if (flying) {
     // Pose de vuelo: patas extendidas hacia los lados (reno volando)
     gfx.fillRect(mx - 42, my,      15, 5); // pata trasera-izq horizontal
@@ -481,32 +481,32 @@ function drawMoose(mx, my, flying) {
     gfx.fillRect(mx + 15, my + 10, 6, 18);
   }
   // Tail (cream, left side)
-  gfx.fillStyle(0xddc888);
+  gfx.fillStyle(0xffdd88);
   gfx.fillEllipse(mx - 25, my + 2, 10, 8);
   // Body
-  gfx.fillStyle(0x7b4419);
+  gfx.fillStyle(0xaa4400);
   gfx.fillEllipse(mx, my, 58, 32);
   // Darker back stripe
-  gfx.fillStyle(0x5a3010);
+  gfx.fillStyle(0x552200);
   gfx.fillEllipse(mx - 4, my - 6, 36, 12);
   // Neck
-  gfx.fillStyle(0x7b4419);
+  gfx.fillStyle(0xaa4400);
   gfx.fillRect(mx + 17, my - 18, 12, 20);
   // Head
   gfx.fillCircle(mx + 27, my - 22, 13);
-  // Snout (long characteristic moose snout)
-  gfx.fillStyle(0x5a3010);
+  // Snout
+  gfx.fillStyle(0x664400);
   gfx.fillEllipse(mx + 39, my - 20, 18, 11);
   // Nostril
-  gfx.fillStyle(0x2a0e00);
+  gfx.fillStyle(0x000000);
   gfx.fillCircle(mx + 45, my - 19, 2);
   // Eye
   gfx.fillStyle(0xffffff);
   gfx.fillCircle(mx + 22, my - 27, 4);
-  gfx.fillStyle(0x111111);
+  gfx.fillStyle(0x000000);
   gfx.fillCircle(mx + 23, my - 27, 2);
-  // Antlers (branching upward)
-  gfx.fillStyle(0x5d3210);
+  // Antlers
+  gfx.fillStyle(0x774400);
   gfx.fillRect(mx + 19, my - 34, 3, 12);
   gfx.fillRect(mx + 25, my - 32, 3, 10);
   gfx.fillRect(mx + 13, my - 38, 14, 3);
@@ -519,29 +519,29 @@ function drawMoose(mx, my, flying) {
 function drawSled(sx, sy, celebrating, shake) {
   const dy = celebrating ? -10 : 0;
   const dx = shake;
-  // Shadow
-  gfx.fillStyle(0x000000, 0.2);
-  gfx.fillEllipse(sx + dx, sy + 22 + dy, 70, 10);
+  // Shadow NES (rect plano)
+  gfx.fillStyle(0x222222);
+  gfx.fillRect(sx - 32 + dx, sy + 20 + dy, 64, 4);
   // Runners
-  gfx.fillStyle(0x3c2005);
+  gfx.fillStyle(0x442200);
   gfx.fillRect(sx - 34 + dx, sy + 16 + dy, 68, 4);
   gfx.fillRect(sx - 30 + dx, sy + 12 + dy, 4, 8);
   gfx.fillRect(sx + 26 + dx, sy + 12 + dy, 4, 8);
   // Sled body (wooden planks)
-  gfx.fillStyle(0x9c6530);
+  gfx.fillStyle(0xcc8800);
   gfx.fillRect(sx - 32 + dx, sy - 8 + dy, 64, 24);
   // Plank grooves
-  gfx.fillStyle(0x7a4d20);
+  gfx.fillStyle(0x885500);
   gfx.fillRect(sx - 32 + dx, sy     + dy, 64, 2);
   gfx.fillRect(sx - 32 + dx, sy + 8 + dy, 64, 2);
   // Front board (upright)
-  gfx.fillStyle(0x8a5520);
+  gfx.fillStyle(0xaa6600);
   gfx.fillRect(sx + 22 + dx, sy - 20 + dy, 8, 36);
   // 3 children
   const bc = celebrating
     ? [0xff8855, 0x55ff88, 0x5588ff]
-    : [0xcc3311, 0x118833, 0x1133aa];
-  const hc = [0xdd2200, 0x009922, 0x0022bb];
+    : [0xff2200, 0x00aa00, 0x0000ff];
+  const hc = [0xff0000, 0x00cc00, 0x0000cc];
   const cxs = [sx - 19 + dx, sx + dx, sx + 19 + dx];
   for (let i = 0; i < 3; i++) {
     const cx2 = cxs[i];
@@ -570,37 +570,43 @@ function drawSled(sx, sy, celebrating, shake) {
 // ─── Zone & separator ───────────────────────────────────────────────────────
 
 function drawZones() {
-  const cols = [0x1a1a2e, 0x16213e, 0x0f3460];
-  for (let i = 0; i < 3; i++) {
-    gfx.fillStyle(cols[i]);
-    gfx.fillRect(0, ZY[i], 800, ZH);
-    if (i < 2) {
-      gfx.fillStyle(0x2a3a55);
-      gfx.fillRect(0, ZY[i] + ZH - 1, 800, 2);
+  // NES: campo de juego negro
+  gfx.fillStyle(0x000000);
+  gfx.fillRect(0, 0, SEPARATOR, 558);
+  // Franjas de piso por zona (indicador NES sutil)
+  const floors = [0x000033, 0x003300, 0x220011];
+  for (let z = 0; z < 3; z++) {
+    gfx.fillStyle(floors[z]);
+    gfx.fillRect(0, ZY[z] + ZH - 4, SEPARATOR, 4);
+    // Líneas de slot (muy oscuras)
+    gfx.fillStyle(0x111111);
+    for (let s = 1; s < 4; s++) {
+      gfx.fillRect(0, ZY[z] + s * SH, SEPARATOR, 1);
     }
   }
-  // Mood tint — only in play zone
+  // Divisores de zona
+  gfx.fillStyle(0x333333);
+  gfx.fillRect(0, ZY[1], SEPARATOR, 1);
+  gfx.fillRect(0, ZY[2], SEPARATOR, 1);
+  // Mood tint — colores sólidos NES, sin alpha
   if (happy()) {
-    gfx.fillStyle(0x00ff88, 0.06);
+    gfx.fillStyle(0x002200);
     gfx.fillRect(0, ZY[m.zone], SEPARATOR, ZH);
   } else {
-    gfx.fillStyle(0xff2200, 0.05);
+    gfx.fillStyle(0x220000);
     gfx.fillRect(0, ZY[m.zone], SEPARATOR, ZH);
-    gfx.fillStyle(0xff2200, 0.05);
+    gfx.fillStyle(0x220000);
     gfx.fillRect(0, ZY[f.zone], SEPARATOR, ZH);
   }
 }
 
 function drawSeparator() {
-  // Shadow on play-zone side
-  gfx.fillStyle(0x000000, 0.35);
-  gfx.fillRect(SEPARATOR - 4, 0, 4, 558);
-  // Main line
-  gfx.fillStyle(0x5577aa);
-  gfx.fillRect(SEPARATOR, 0, 3, 558);
-  // Highlight
-  gfx.fillStyle(0x99bbdd);
-  gfx.fillRect(SEPARATOR + 3, 0, 1, 558);
+  // Panel de yetis: fondo azul-negro NES
+  gfx.fillStyle(0x000022);
+  gfx.fillRect(SEPARATOR + 2, 0, 800 - SEPARATOR - 2, 558);
+  // Línea blanca NES (separador nítido)
+  gfx.fillStyle(0xffffff);
+  gfx.fillRect(SEPARATOR, 0, 2, 558);
 }
 
 // ─── Projectiles ────────────────────────────────────────────────────────────
@@ -623,18 +629,15 @@ function drawProjectiles() {
 // ── Obstacle: spiny angry bush ──────────────────────────────────────────────
 function drawBush(x, y, w, h) {
   const cx = x + w / 2, cy = y + h / 2;
-  // Dark undergrowth shadow
-  gfx.fillStyle(0x0d2208);
-  gfx.fillEllipse(cx, cy + 4, w * 0.78, h * 0.55);
-  // Main body
-  gfx.fillStyle(0x2d6b1e);
+  // Main body NES green
+  gfx.fillStyle(0x008800);
   gfx.fillEllipse(cx, cy, w * 0.84, h * 0.72);
   // Darker leaf clusters
-  gfx.fillStyle(0x1a4010);
+  gfx.fillStyle(0x004400);
   gfx.fillEllipse(cx - w * 0.15, cy + h * 0.06, w * 0.34, h * 0.3);
   gfx.fillEllipse(cx + w * 0.18, cy - h * 0.07, w * 0.28, h * 0.26);
-  // Yellow-brown spines around perimeter
-  gfx.fillStyle(0xc8a222);
+  // Spines NES yellow
+  gfx.fillStyle(0xffcc00);
   const n = Math.max(7, Math.round(w / 11));
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2;
@@ -663,22 +666,22 @@ function drawSnake(x, y, w, h) {
   for (let i = segs; i >= 0; i--) {
     const sx = x + w * (1 - i / segs);
     const sy = cy + Math.sin(i * 1.0) * h * 0.22;
-    gfx.fillStyle(i % 2 === 0 ? 0x4ea82a : 0x2d6b1e);
+    gfx.fillStyle(i % 2 === 0 ? 0x44cc00 : 0x228800);
     gfx.fillCircle(sx, sy, r);
   }
   // Head (left side, facing direction of travel)
   const hx = x + r * 1.4, hy = cy;
-  gfx.fillStyle(0x66cc33);
+  gfx.fillStyle(0x55ff22);
   gfx.fillEllipse(hx, hy, r * 2.8, h * 0.56);
   // Angry eyes
-  gfx.fillStyle(0xff3300);
+  gfx.fillStyle(0xff0000);
   gfx.fillCircle(hx - r * 0.35, hy - r * 0.3, 4);
   gfx.fillCircle(hx + r * 0.35, hy - r * 0.3, 4);
   gfx.fillStyle(0x000000);
   gfx.fillCircle(hx - r * 0.35, hy - r * 0.3, 2);
   gfx.fillCircle(hx + r * 0.35, hy - r * 0.3, 2);
   // Forked tongue extending left
-  gfx.fillStyle(0xff1144);
+  gfx.fillStyle(0xff0044);
   gfx.fillRect(x, hy - 2, r * 1.2, 3);
   gfx.fillRect(x, hy - 6, r * 0.65, 3);
   gfx.fillRect(x, hy + 3, r * 0.65, 3);
@@ -688,34 +691,34 @@ function drawSnake(x, y, w, h) {
 function drawOpossum(x, y, w, h) {
   const cy = y + h / 2;
   // Coiled tail (right side)
-  gfx.fillStyle(0xf0c8a0);
+  gfx.fillStyle(0xffddaa);
   gfx.fillEllipse(x + w * 0.83, cy + h * 0.14, w * 0.24, h * 0.26);
   gfx.fillEllipse(x + w * 0.75, cy + h * 0.32, w * 0.18, h * 0.2);
   // Body
-  gfx.fillStyle(0x909090);
+  gfx.fillStyle(0xaaaaaa);
   gfx.fillEllipse(x + w * 0.55, cy, w * 0.58, h * 0.62);
   // Belly
-  gfx.fillStyle(0xd8d8d8);
+  gfx.fillStyle(0xeeeeee);
   gfx.fillEllipse(x + w * 0.5, cy + h * 0.06, w * 0.36, h * 0.38);
   // Head
   const hx = x + w * 0.22, hy = cy - h * 0.04;
-  gfx.fillStyle(0xa8a8a8);
+  gfx.fillStyle(0xbbbbbb);
   gfx.fillCircle(hx, hy, h * 0.24);
   // Ear
-  gfx.fillStyle(0x888888);
+  gfx.fillStyle(0x999999);
   gfx.fillTriangle(hx - h * 0.04, hy - h * 0.22, hx + h * 0.1, hy - h * 0.22, hx + h * 0.03, hy - h * 0.42);
-  gfx.fillStyle(0xf0aaaa);
+  gfx.fillStyle(0xffaaaa);
   gfx.fillTriangle(hx - h * 0.02, hy - h * 0.22, hx + h * 0.08, hy - h * 0.22, hx + h * 0.03, hy - h * 0.38);
   // Pointed snout
-  gfx.fillStyle(0xbbbbbb);
+  gfx.fillStyle(0xcccccc);
   gfx.fillTriangle(hx - h * 0.27, hy, hx - h * 0.06, hy - h * 0.09, hx - h * 0.06, hy + h * 0.09);
   // Angry eye
-  gfx.fillStyle(0xff3300);
+  gfx.fillStyle(0xff0000);
   gfx.fillCircle(hx + h * 0.04, hy - h * 0.06, 4);
   gfx.fillStyle(0x000000);
   gfx.fillCircle(hx + h * 0.04, hy - h * 0.06, 2);
   // Legs
-  gfx.fillStyle(0x888888);
+  gfx.fillStyle(0x999999);
   gfx.fillRect(x + w * 0.38, cy + h * 0.28, 7, 11);
   gfx.fillRect(x + w * 0.54, cy + h * 0.28, 7, 11);
 }
@@ -726,25 +729,25 @@ function drawWall(x, y, w, h) {
   for (let i = 0; i < n; i++) {
     const by = y + i * SH;
     const bh = Math.min(SH, y + h - by);
-    gfx.fillStyle(i % 2 === 0 ? 0x1a4488 : 0x2255aa);
+    gfx.fillStyle(i % 2 === 0 ? 0x0000aa : 0x0044cc);
     gfx.fillRect(x, by, w, bh - 1);
-    gfx.fillStyle(0x66aaff, 0.35);
+    gfx.fillStyle(0x3366ee);
     gfx.fillRect(x + 2, by + 2, w - 4, 7);
-    gfx.fillStyle(0x0a2244);
+    gfx.fillStyle(0x000066);
     gfx.fillRect(x, by + bh - 1, w, 1);
   }
   // Right edge highlight
-  gfx.fillStyle(0x88ccff, 0.5);
+  gfx.fillStyle(0x88ccff);
   gfx.fillRect(x + w - 3, y, 3, h);
-  // Left-facing ice spikes (dangerous side toward player)
-  gfx.fillStyle(0xcce8ff);
+  // Left-facing ice spikes NES
+  gfx.fillStyle(0xaaddff);
   const ns = Math.ceil(h / 20);
   for (let i = 0; i < ns; i++) {
     const sy = y + (i + 0.5) * (h / ns);
     gfx.fillTriangle(x, sy - 9, x, sy + 9, x - 17, sy);
-    gfx.fillStyle(0xffffff, 0.6);
+    gfx.fillStyle(0xffffff);
     gfx.fillTriangle(x, sy - 9, x - 5, sy - 5, x - 17, sy);
-    gfx.fillStyle(0xcce8ff);
+    gfx.fillStyle(0xaaddff);
   }
 }
 
@@ -752,19 +755,15 @@ function drawWall(x, y, w, h) {
 function drawCoin(x, y, w, h) {
   const cx = x + w / 2, cy = y + h / 2;
   const r = Math.min(w, h) * 0.42;
-  gfx.fillStyle(0xc8900a);
+  // Moneda NES: amarillo plano, sin shine
+  gfx.fillStyle(0xcc8800);
   gfx.fillCircle(cx, cy, r);
-  gfx.fillStyle(0xffd700);
-  gfx.fillCircle(cx, cy, r * 0.84);
-  gfx.fillStyle(0xffed8a);
-  gfx.fillCircle(cx, cy, r * 0.6);
+  gfx.fillStyle(0xffcc00);
+  gfx.fillCircle(cx, cy, r * 0.80);
   // Cross symbol
-  gfx.fillStyle(0xc8900a);
+  gfx.fillStyle(0xaa6600);
   gfx.fillRect(cx - 2, cy - r * 0.48, 4, r * 0.96);
   gfx.fillRect(cx - r * 0.48, cy - 2, r * 0.96, 4);
-  // Sparkle
-  gfx.fillStyle(0xffffff);
-  gfx.fillCircle(cx - r * 0.48, cy - r * 0.52, 2);
 }
 
 // ── Goodie: lollipop candy ───────────────────────────────────────────────────
@@ -773,10 +772,10 @@ function drawCandy(x, y, w, h) {
   const r = Math.min(w, h) * 0.36;
   const ccy = y + r + 6;
   // Stick
-  gfx.fillStyle(0xddddb8);
+  gfx.fillStyle(0xccccaa);
   gfx.fillRect(cx - 2, ccy + r, 4, h - r - (ccy - y) - 4);
-  // Candy circle
-  gfx.fillStyle(0xff3366);
+  // Candy circle NES pink
+  gfx.fillStyle(0xff2266);
   gfx.fillCircle(cx, ccy, r);
   // White swirl
   gfx.fillStyle(0xffffff);
@@ -788,24 +787,19 @@ function drawCandy(x, y, w, h) {
       cx + Math.cos(a + 0.75) * r, ccy + Math.sin(a + 0.75) * r
     );
   }
-  gfx.fillStyle(0xff3366);
+  gfx.fillStyle(0xff2266);
   gfx.fillCircle(cx, ccy, r * 0.3);
-  // Shine
-  gfx.fillStyle(0xffffff);
-  gfx.fillCircle(cx - r * 0.32, ccy - r * 0.34, r * 0.16);
 }
 
 // ── Goodie: heart ────────────────────────────────────────────────────────────
 function drawHeart(x, y, w, h) {
   const cx = x + w / 2, cy = y + h / 2;
   const r = Math.min(w, h) * 0.27;
-  gfx.fillStyle(0xff2255);
+  // Corazón NES rojo puro, sin shine
+  gfx.fillStyle(0xff0000);
   gfx.fillCircle(cx - r, cy - r * 0.2, r);
   gfx.fillCircle(cx + r, cy - r * 0.2, r);
   gfx.fillTriangle(cx - r * 1.92, cy - r * 0.18, cx + r * 1.92, cy - r * 0.18, cx, cy + r * 1.8);
-  // Shine
-  gfx.fillStyle(0xff88aa);
-  gfx.fillCircle(cx - r * 0.85, cy - r * 0.55, r * 0.34);
 }
 
 // ─── Characters ─────────────────────────────────────────────────────────────
@@ -815,11 +809,11 @@ function drawHeart(x, y, w, h) {
 function drawChar(ch, cx, isFemale, forceHappy) {
   const y = ch.cy + ch.bounce;
   const h = forceHappy !== undefined ? forceHappy : happy();
-  const B = 0xc8dcff, S = 0xf0f8ff, D = 0x7799cc; // yeti ice-white fur
+  const B = 0xdddddd, S = 0xffffff, D = 0x888888; // yeti NES white
 
-  // Shadow
-  gfx.fillStyle(0x000000, 0.28);
-  gfx.fillEllipse(cx, y + 56, 62, 12);
+  // Shadow (flat dark rect, NES style)
+  gfx.fillStyle(0x222222);
+  gfx.fillRect(cx - 28, y + 54, 56, 6);
 
   // Legs
   gfx.fillStyle(D);
@@ -835,7 +829,7 @@ function drawChar(ch, cx, isFemale, forceHappy) {
   gfx.fillEllipse(cx, y + 5, 36, 42);
 
   // Scarf / tie
-  gfx.fillStyle(h ? 0x44aaff : 0x1155aa);
+  gfx.fillStyle(h ? 0x0066ff : 0x003399);
   gfx.fillTriangle(cx - 5, y - 7, cx + 5, y - 7, cx, y + 17);
 
   // Arms
@@ -877,10 +871,10 @@ function drawChar(ch, cx, isFemale, forceHappy) {
   gfx.fillStyle(0xffffff);
   gfx.fillCircle(cx - 11, y - 44, 7);
   gfx.fillCircle(cx + 11, y - 44, 7);
-  gfx.fillStyle(h ? 0x44aaff : 0xff2200);
+  gfx.fillStyle(h ? 0x0000ff : 0xff0000);
   gfx.fillCircle(cx - 11, h ? y - 43 : y - 46, 5);
   gfx.fillCircle(cx + 11, h ? y - 43 : y - 46, 5);
-  gfx.fillStyle(0x111111);
+  gfx.fillStyle(0x000000);
   gfx.fillCircle(cx - 11, h ? y - 43 : y - 46, 2);
   gfx.fillCircle(cx + 11, h ? y - 43 : y - 46, 2);
 
@@ -902,13 +896,13 @@ function drawChar(ch, cx, isFemale, forceHappy) {
     gfx.fillRect(cx - 8 + i * 4, my, 3, 3);
   }
 
-  // Female yeti: ice crystal crown
+  // Female yeti: corona de cristal NES cyan
   if (isFemale) {
-    gfx.fillStyle(0xaaddff);
+    gfx.fillStyle(0x44ffff);
     gfx.fillTriangle(cx - 4, y - 65, cx, y - 86, cx + 4, y - 65);
     gfx.fillTriangle(cx - 14, y - 65, cx - 10, y - 80, cx - 5, y - 65);
     gfx.fillTriangle(cx + 5, y - 65, cx + 10, y - 80, cx + 14, y - 65);
-    gfx.fillStyle(0xeef8ff, 0.85);
+    gfx.fillStyle(0xffffff);
     gfx.fillCircle(cx, y - 86, 3);
     gfx.fillCircle(cx - 10, y - 80, 2);
     gfx.fillCircle(cx + 10, y - 80, 2);
@@ -922,11 +916,11 @@ function showTitleScreen() {
   const mk = (x, y, t, sz, col) => {
     const o = scene.add.text(x, y, t, {
       fontSize: sz + 'px', color: col, fontFamily: 'monospace',
-      stroke: '#000033', strokeThickness: 3
+      stroke: '#000000', strokeThickness: 3
     }).setOrigin(0.5);
     uiObjects.push(o); return o;
   };
-  mk(400, 82, 'Yeti-Aventuras', 54, '#aaddff');
+  mk(400, 82, 'Yeti-Aventuras', 54, '#ffff00');
   mk(400, 388, 'Presiona un bot\u00f3n para iniciar', 18, '#ffffff');
 }
 
@@ -934,17 +928,18 @@ function drawTitleBg(delta) {
   titleSledX += delta * 0.18;
   if (titleSledX > 920) titleSledX = -180;
   const t = Date.now();
-  gfx.fillStyle(0x050a18, 1);
+  // NES: fondo negro
+  gfx.fillStyle(0x000000);
   gfx.fillRect(0, 0, 800, 600);
-  // Stars
+  // Estrellas fijas NES (sin parpadeo alpha — patrón determinista)
   for (let i = 0; i < 50; i++) {
     const sx = (i * 97 + 43) % 800, sy = (i * 53 + 17) % 420;
-    gfx.fillStyle(0xffffff, Math.sin(t * 0.002 + i) * 0.4 + 0.6);
-    gfx.fillRect(sx, sy, 2, 2);
+    gfx.fillStyle(i % 3 === 0 ? 0xffffff : (i % 3 === 1 ? 0xaaaaff : 0xffff88));
+    gfx.fillRect(sx, sy, i % 5 === 0 ? 2 : 1, i % 5 === 0 ? 2 : 1);
   }
-  // Snow ground
-  gfx.fillStyle(0xddeeff); gfx.fillRect(0, 480, 800, 120);
-  gfx.fillStyle(0xffffff); gfx.fillEllipse(400, 481, 920, 28);
+  // Nieve: blanco plano NES
+  gfx.fillStyle(0xffffff); gfx.fillRect(0, 478, 800, 122);
+  gfx.fillStyle(0xaaccff); gfx.fillRect(0, 478, 800, 3);
   // Yetis beside the title (happy, bouncing)
   const lb = Math.sin(t * 0.0035) * 8;
   const rb = Math.sin(t * 0.0035 + 1.6) * 8;
@@ -963,13 +958,11 @@ function drawScoresBg() {
   // Black background
   gfx.fillStyle(0x000000, 1);
   gfx.fillRect(0, 0, 800, 600);
-  // Stars
-  gfx.fillStyle(0xffffff, 0.5);
+  // Estrellas fijas NES
   for (let i = 0; i < 30; i++) {
     const sx = (i * 97 + 43) % 800;
     const sy = (i * 53 + 17) % 480;
-    const blink = Math.sin(t * 0.002 + i) * 0.4 + 0.6;
-    gfx.fillStyle(0xffffff, blink * 0.6);
+    gfx.fillStyle(i % 2 === 0 ? 0xffffff : 0xaaaaff);
     gfx.fillRect(sx, sy, 2, 2);
   }
   // Happy female gorilla — left side, bouncing arms
@@ -981,7 +974,7 @@ function drawScoresBg() {
   // Moose + sled celebrating — bottom center
   const cSledX = 340, cMooseX = 430, cY = 543;
   // Rope (simple slack bezier)
-  gfx.lineStyle(2, 0x885522, 1);
+  gfx.lineStyle(2, 0xaa6600, 1);
   gfx.beginPath(); gfx.moveTo(cSledX + 33, cY);
   const cpx = (cSledX + 33 + cMooseX - 28) / 2;
   for (let i = 1; i <= 8; i++) {
@@ -1000,11 +993,11 @@ function drawRhythmBar() {
   const BY = 558, BH = 40, CW = 200;
   for (let i = 0; i < 4; i++) {
     const active = i === rStep;
-    gfx.fillStyle(active ? 0x222200 : 0x0a0a0a, 0.92);
+    gfx.fillStyle(active ? 0x111100 : 0x000000);
     gfx.fillRect(i * CW, BY, CW, BH);
-    gfx.lineStyle(1, active ? 0xffff00 : 0x333333, 1);
+    gfx.lineStyle(1, active ? 0xffff00 : 0x444444, 1);
     gfx.strokeRect(i * CW, BY, CW, BH);
-    const nc = active ? 0xffff00 : 0x555555;
+    const nc = active ? 0xffff00 : 0x444444;
     const nx = i * CW + CW / 2, ny = BY + 16;
     gfx.fillStyle(nc);
     gfx.fillEllipse(nx, ny + 6, 12, 9);
@@ -1114,9 +1107,9 @@ function showNamingScreen() {
     uiObjects.push(o);
     return o;
   };
-  mk(300, 185, 'GAME OVER', 46, '#ff2200');
+  mk(300, 185, 'GAME OVER', 46, '#ff0000');
   mk(300, 243, 'SCORE: ' + score, 24, '#ffff44');
-  mk(300, 283, 'TOP 10 - INGRESA TUS INICIALES:', 14, '#aaffaa');
+  mk(300, 283, 'TOP 10 - INGRESA TUS INICIALES:', 14, '#00ff00');
   letterTexts = [];
   for (let i = 0; i < 3; i++) {
     const o = scene.add.text(252 + i * 54, 326, initials[i], {
@@ -1183,7 +1176,7 @@ function showScoresScreen(scores) {
     uiObjects.push(o);
     return o;
   };
-  mk(400, 20, 'TOP 10 SCORES', 26, '#ffdd00');
+  mk(400, 20, 'TOP 10 SCORES', 26, '#ffff00');
   mk(400, 52, 'SCORE FINAL: ' + score, 16, '#aaaaaa');
   const list = scores.slice(0, 10);
   for (let i = 0; i < list.length; i++) {
@@ -1193,7 +1186,7 @@ function showScoresScreen(scores) {
       hi ? '#ffff44' : '#cccccc');
   }
   if (list.length === 0) mk(400, 200, '(sin registros aun)', 16, '#666666');
-  mk(400, 458, '[ Enter / 1 ]   REINICIAR', 17, '#55ff55');
+  mk(400, 458, '[ Enter / 1 ]   REINICIAR', 17, '#00ff00');
 }
 
 function updateScoresInput(delta) {
